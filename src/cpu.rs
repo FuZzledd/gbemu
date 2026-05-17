@@ -326,6 +326,8 @@ impl<T: Memory + Default> CPU<T> {
                 1 => {
                     self.decode_state.msb = ctx.memory.read_u8(self.pc);
                     self.increment_pc(ctx);
+                }
+                2 => {
                     self.state = State::Execute(
                         Operation::Load(
                             Ind(Indirect::Imm16(u16::from_le_bytes([
@@ -351,19 +353,13 @@ impl<T: Memory + Default> CPU<T> {
                     0o7 => C,
                     _ => unreachable!(),
                 };
-                match step {
-                    0 => {
-                        self.decode_state.offset = ctx.memory.read_u8(self.pc) as i8;
-                        self.increment_pc(ctx);
-                    }
-                    1 => {
-                        self.state = State::Execute(
-                            Operation::JumpRelative(condition, self.decode_state.offset),
-                            0,
-                        );
-                    }
-                    _ => unreachable!(),
-                }
+
+                self.decode_state.offset = ctx.memory.read_u8(self.pc) as i8;
+                self.increment_pc(ctx);
+                self.state = State::Execute(
+                    Operation::JumpRelative(condition, self.decode_state.offset),
+                    0,
+                );
             }
             (0o0, op, 0o1) => {
                 let target = match op >> 1 {
@@ -378,7 +374,6 @@ impl<T: Memory + Default> CPU<T> {
                         0 => {
                             self.decode_state.lsb = ctx.memory.read_u8(self.pc);
                             self.increment_pc(ctx);
-                            println!("{step}, {op}, {}", self.decode_state.lsb);
                         }
                         1 => {
                             self.decode_state.msb = ctx.memory.read_u8(self.pc);
@@ -1396,8 +1391,7 @@ impl<T: Memory + Default> CPU<T> {
                 };
 
                 match step {
-                    0 => {}
-                    1 => {
+                    0 => {
                         if !condition_met {
                             self.state = State::ExecutionDone;
                         } else {
@@ -1407,12 +1401,12 @@ impl<T: Memory + Default> CPU<T> {
                             self.registers.sp = self.registers.sp.wrapping_sub(1);
                         }
                     }
-                    2 => {
+                    1 => {
                         ctx.memory
                             .write_u8(self.registers.sp, self.execute_state.msb);
                         self.registers.sp = self.registers.sp.wrapping_sub(1);
                     }
-                    3 => {
+                    2 => {
                         ctx.memory
                             .write_u8(self.registers.sp, self.execute_state.lsb);
                         let Target::Imm16(address) = target else {
@@ -1420,7 +1414,7 @@ impl<T: Memory + Default> CPU<T> {
                         };
                         self.pc = address;
                     }
-                    4 => {
+                    3 => {
                         self.state = State::ExecutionDone;
                     }
                     _ => unreachable!(),
@@ -1671,7 +1665,7 @@ impl<T: Memory + Default> CPU<T> {
     }
 
     pub(crate) fn halt(&mut self, _ctx: &mut Context<T>) {
-        self.halted = false;
+        self.halted = true;
         self.state = State::ExecutionDone;
     }
 
@@ -1776,10 +1770,15 @@ impl<T: Memory + Default> CPU<T> {
         // debug!("Load of value {value:04X} to {destination:?}");
         match destination {
             Target::R8(_) => unimplemented!("Invalid 16-bit write to 8-bit register"),
-            Target::R16(register) => {
-                self.set_register16(register, value);
-                self.state = State::ExecutionDone;
-            }
+            Target::R16(register) => match step {
+                x if x == starting_step => {
+                    self.set_register16(register, value);
+                }
+                x if x == starting_step + 1 => {
+                    self.state = State::ExecutionDone;
+                }
+                _ => unreachable!(),
+            },
             Target::Imm8(_) => unimplemented!("Invalid write to immediate"),
             Target::Imm16(_) => unimplemented!("Invalid write to immediate"),
             Target::Ind(indirect) => match indirect {
@@ -1794,6 +1793,8 @@ impl<T: Memory + Default> CPU<T> {
                     x if x == starting_step + 1 => {
                         ctx.memory
                             .write_u8(address.wrapping_add(1), self.execute_state.msb);
+                    }
+                    x if x == starting_step + 2 => {
                         self.state = State::ExecutionDone;
                     }
                     _ => unreachable!(),
@@ -1970,31 +1971,20 @@ impl<T: Memory + Default> CPU<T> {
                 self.state = State::ExecutionDone;
             }
             Target::Imm16(address) => match step {
-                0 => match condition {
-                    Condition::None => {
+                0 => {
+                    self.execute_state.condition_met = match condition {
+                        Condition::None => true,
+                        Condition::NZ => !self.registers.f.zero(),
+                        Condition::Z => self.registers.f.zero(),
+                        Condition::NC => !self.registers.f.carry(),
+                        Condition::C => self.registers.f.carry(),
+                    };
+                    if self.execute_state.condition_met {
                         self.pc = address;
+                    } else {
+                        self.state = State::ExecutionDone;
                     }
-                    Condition::NZ => {
-                        if !self.registers.f.zero() {
-                            self.pc = address;
-                        }
-                    }
-                    Condition::Z => {
-                        if self.registers.f.zero() {
-                            self.pc = address;
-                        }
-                    }
-                    Condition::NC => {
-                        if !self.registers.f.carry() {
-                            self.pc = address;
-                        }
-                    }
-                    Condition::C => {
-                        if self.registers.f.carry() {
-                            self.pc = address;
-                        }
-                    }
-                },
+                }
                 1 => self.state = State::ExecutionDone,
                 _ => unreachable!(),
             },
@@ -2019,15 +2009,15 @@ impl<T: Memory + Default> CPU<T> {
             }
             1 => {
                 if self.execute_state.condition_met {
-                    self.execute_state.result = self.pc.wrapping_add_signed(offset as i16);
+                    self.execute_state.address = self.pc.wrapping_add_signed(offset as i16);
                 } else {
                     self.state = State::ExecutionDone;
                 }
             }
             2 => {
-                self.pc = self.execute_state.result;
+                self.pc = self.execute_state.address;
+                self.state = State::ExecutionDone;
             }
-            3 => self.state = State::ExecutionDone,
             _ => unreachable!(),
         }
     }

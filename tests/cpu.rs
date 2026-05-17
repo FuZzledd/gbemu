@@ -124,6 +124,9 @@ fn test_opcode(path: &Utf8Path, content: String) -> datatest_stable::Result<()> 
             cb = cpu.ir == 0xCB;
 
             cpu.tick(&mut context);
+            if cpu.halted {
+                println!("CPU HALTED");
+            }
             println!("CPU State: {:02X?}", cpu.state);
             println!("{}", cpu.dump_state(&mut context));
         }
@@ -143,13 +146,18 @@ fn test_opcode(path: &Utf8Path, content: String) -> datatest_stable::Result<()> 
                 ei,
                 ram,
             } = final_state;
-            assert_eq!(
-                cpu.pc.wrapping_sub(1),
-                pc,
-                "PC {:04X} == {:04X}",
-                cpu.pc.wrapping_sub(1),
-                pc,
-            );
+            if !cpu.halted {
+                assert_eq!(
+                    cpu.pc.wrapping_sub(1),
+                    pc,
+                    "PC {:04X} == {:04X}",
+                    cpu.pc.wrapping_sub(1),
+                    pc,
+                );
+            } else {
+                assert_eq!(cpu.pc, pc, "PC {:04X} == {:04X}", cpu.pc, pc,);
+            }
+
             assert_eq!(
                 cpu.registers.sp, sp,
                 "SP {:04X} == {:04X}",
