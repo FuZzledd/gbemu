@@ -1,10 +1,12 @@
 # gbemu (better name TBD)
 
-This is a very WIP Game Boy emulator.
+This is a very WIP Game Boy emulator, with an Iced frontend
 
-Current state:
-- Implemented CPU, passes most of Blargg's cpu-instr tests, and SSTs (with the exception of the STOP instruction, which is unimplemented currently)
-- Basic PPU implementation, seemingly functional, only BG layer rendering for now.
+## Current state:
+- Implemented CPU, passes Blargg's cpu-instr tests, and all SSTs (with the exception of the STOP instruction, which is unimplemented currently)
+- PPU implementation, passes dmg_acid2
 - No OAM DMA implemented yet
 - No sound
 - No controls
+- No serial
+- No mappers

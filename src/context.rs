@@ -147,7 +147,6 @@ impl Timer {
     pub(crate) fn handle_overflow(&mut self, tma: u8, interrupts: &mut impl InterruptRegister) {
         self.tima = tma;
 
-        // TODO: Schedule interrupt here
         interrupts.schedule_interrupt(InterruptType::Timer);
     }
 }
@@ -196,32 +195,36 @@ impl InterruptRegister for InterruptFlag {
     }
 }
 
-fn unimplemented() -> u8 {
+#[allow(unused)]
+fn unimplemented_io_read(address: u8) -> u8 {
     0xFF
 }
+
+#[allow(unused)]
+fn unimplemented_io_write(address: u8, value: u8) {}
 
 impl IoRegisters {
     pub(crate) fn read_u8(&self, address: u8) -> u8 {
         match address {
             0x00 => self.joypad.read(),
             0x01..=0x02 => self.serial.read(address),
-            0x03 => unimplemented(),
+            0x03 => unimplemented_io_read(address),
             0x04..=0x07 => self.timer.read(address),
-            0x08..0x0F => unimplemented!(),
+            0x08..0x0F => unimplemented_io_read(address),
             0x0F => self.interrupt.read(),
-            0x10..=0x26 => unimplemented(),
-            0x27..0x30 => unimplemented!(),
-            0x30..=0x3F => unimplemented(),
+            0x10..=0x26 => unimplemented_io_read(address),
+            0x27..0x30 => unimplemented_io_read(address),
+            0x30..=0x3F => unimplemented_io_read(address),
             0x40..=0x4B => self.lcd.read(address),
 
             0x50 => {
                 // Bootrom bank control, write-only
-                0xFF
+                unimplemented_io_read(address)
             }
             0x80.. => unreachable!(),
             _ => {
                 debug!("CGB/unused IO address: {address}");
-                unimplemented()
+                unimplemented_io_read(address)
             }
         }
     }
@@ -230,25 +233,23 @@ impl IoRegisters {
         match address {
             0x00 => self.joypad.write(value),
             0x01..=0x02 => self.serial.write(address, value),
-            0x03 => unimplemented!(),
+            0x03 => unimplemented_io_write(address, value),
             0x04..=0x07 => self.timer.write(address, value),
-            0x08..0x0F => unimplemented!(),
+            0x08..0x0F => unimplemented_io_write(address, value),
             0x0F => self.interrupt.write(value),
-            0x10..=0x26 => {
-                //TODO: AUDIO
-            }
-            0x27..0x30 => unimplemented!(),
-            0x30..=0x3F => {
-                //TODO: WAVE PATTERN
-            }
+            0x10..=0x26 => unimplemented_io_write(address, value),
+            0x27..0x30 => unimplemented_io_write(address, value),
+            0x30..=0x3F => unimplemented_io_write(address, value),
             0x40..=0x4B => self.lcd.write(address, value),
 
             0x50 => {
                 // Bootrom bank control, write-only
+                unimplemented_io_write(address, value)
             }
             0x80.. => unreachable!(),
             _ => {
-                debug!("CGB/unused IO address: {address}")
+                debug!("CGB/unused IO address: {address}");
+                unimplemented_io_write(address, value)
             }
         }
     }
@@ -396,6 +397,8 @@ pub trait Io {
 
     fn interrupt_flag(&self) -> &impl InterruptRegister;
     fn interrupt_flag_mut(&mut self) -> &mut impl InterruptRegister;
+
+    fn tick_timer(&mut self);
 }
 
 impl Io for IoRegisters {
@@ -413,6 +416,10 @@ impl Io for IoRegisters {
 
     fn interrupt_flag_mut(&mut self) -> &mut impl InterruptRegister {
         &mut self.interrupt
+    }
+
+    fn tick_timer(&mut self) {
+        self.timer.tick(&mut self.interrupt);
     }
 }
 
@@ -460,11 +467,11 @@ impl Memory for FlatMemory {
         &mut self.0[0xFFFF]
     }
 
-    fn load_boot_rom(&mut self, rom: &[u8]) {
+    fn load_boot_rom(&mut self, _rom: &[u8]) {
         todo!()
     }
 
-    fn load_rom(&mut self, rom: &[u8]) {
+    fn load_rom(&mut self, _rom: &[u8]) {
         todo!()
     }
 }
@@ -485,9 +492,13 @@ impl Io for FlatMemory {
     fn interrupt_flag_mut(&mut self) -> &mut impl InterruptRegister {
         self
     }
+
+    fn tick_timer(&mut self) {
+        // self.tick(interrupts);
+    }
 }
 impl TimerRegisters for FlatMemory {
-    fn tick(&mut self, interrupts: &mut impl InterruptRegister) {}
+    fn tick(&mut self, _interrupts: &mut impl InterruptRegister) {}
 }
 
 impl InterruptRegister for FlatMemory {

@@ -25,3 +25,7 @@ rustc-ice-*.txt
 
 bootrom/*
 log.txt
+
+perf.data
+profile.json.gz
+flamegraph.svg

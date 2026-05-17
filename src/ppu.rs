@@ -480,22 +480,26 @@ pub struct PPU {
     pub cycle_counter: u32,
     pub current_mode: Mode,
     obj_buffer: StackArrayDeque<OamEntry, 10>,
-    #[default(ArrayDeque::new(40))]
-    oam_copy: ArrayDeque<OamEntry>,
+    #[default(StackArrayDeque::new())]
+    oam_copy: StackArrayDeque<OamEntry, 40>,
     bg_fifo: StackArrayDeque<u8, 8>,
     sprite_fifo: StackArrayDeque<SpritePixel, 8>,
     bg_fetcher_state: BgFetcherState,
     sprite_fetcher_state: SpriteFetcherState,
     screen_x: u8,
     scx_counter: u8,
-    #[default(ArrayDeque::new(10))]
-    sprites_to_fetch: ArrayDeque<(usize, OamEntry)>,
+    #[default(StackArrayDeque::new())]
+    sprites_to_fetch: StackArrayDeque<(usize, OamEntry), 10>,
     fetching_sprite: Option<OamEntry>,
     oam_index: usize,
     #[default([Default::default(); 160*144])]
     pub screen: [Pixel; 160 * 144],
     stat_interrupt_line: bool,
     first_tile_fetch: bool,
+    sprites_fetched: bool,
+    window_y_condition: bool,
+    in_window: bool,
+    window_row: u8,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -555,6 +559,8 @@ impl PPU {
             }
             Mode::VBlank => {
                 if self.cycle_counter == 0 && ctx.memory.io.lcd.ly == 144 {
+                    self.window_y_condition = false;
+                    self.window_row = 255;
                     ctx.memory
                         .io_mut()
                         .interrupt_flag_mut()
@@ -568,6 +574,7 @@ impl PPU {
                     } else {
                         ctx.memory.io.lcd.ly += 1;
                         self.cycle_counter = 0;
+                        self.screen = [Default::default(); 160 * 144];
                     }
                 } else {
                     self.cycle_counter += 1;
@@ -596,7 +603,7 @@ impl PPU {
         match self.cycle_counter {
             0 => {
                 self.obj_buffer.clear();
-                self.oam_copy = ArrayDeque::from(ctx.memory.oam.oam_entries());
+                self.oam_copy = ctx.memory.oam.oam_entries().iter().cloned().collect();
             }
             x if x % 2 == 0 => {
                 //Stall
@@ -622,21 +629,55 @@ impl PPU {
 
     fn pixel_transfer(&mut self, ctx: &mut Context<MemoryBus>) {
         if self.cycle_counter == 80 {
-            self.screen_x = 0;
+            self.screen_x = 0u8.wrapping_sub(8);
             self.scx_counter = ctx.memory.io.lcd.scx % 8;
             self.first_tile_fetch = true;
+            if ctx.memory.io.lcd.wy <= ctx.memory.io.lcd.ly {
+                self.window_y_condition = true;
+            }
         }
-        if self.sprites_to_fetch.is_empty() {
+        // if !ctx.memory.io.lcd.lcdc.window_enable() {
+        //     self.window_y_condition = false;
+        // }
+
+        if self.window_y_condition
+            && self.screen_x.wrapping_add(7) == ctx.memory.io.lcd.wx
+            && ctx.memory.io.lcd.lcdc.window_enable()
+            && !self.in_window
+        {
+            self.in_window = true;
+            self.bg_fetcher_state.clear();
+            self.bg_fifo.clear();
+            self.first_tile_fetch = true;
+            self.window_row = self.window_row.wrapping_add(1);
+        }
+        if self.in_window
+            && self.bg_fifo.is_empty()
+            && (self.screen_x.wrapping_add(7) < ctx.memory.io.lcd.wx
+                || !ctx.memory.io.lcd.lcdc.window_enable())
+        {
+            self.in_window = false;
+            self.bg_fetcher_state.clear();
+            self.bg_fifo.clear();
+            self.first_tile_fetch = true;
+        }
+
+        if !self.sprites_fetched {
             self.sprites_to_fetch = self
                 .obj_buffer
                 .iter()
                 .cloned()
                 .enumerate()
-                .filter(|(index, entry)| entry.x() + 8 == self.screen_x)
+                .filter(|(index, entry)| entry.x().wrapping_sub(8) == self.screen_x)
                 .collect();
+            self.sprites_fetched = true
         };
+        if !ctx.memory.io.lcd.lcdc.obj_enable() {
+            self.sprite_fetcher_state.clear();
+            self.sprites_to_fetch.clear();
+        }
         if self.cycle_counter % 2 == 1 {
-            if !self.sprites_to_fetch.is_empty() {
+            if !self.sprites_to_fetch.is_empty() && ctx.memory.io.lcd.lcdc.obj_enable() {
                 self.sprite_fetch(ctx);
             } else {
                 self.bg_fetch(ctx);
@@ -653,9 +694,16 @@ impl PPU {
                     let sprite_palette = ctx.memory.io.lcd.obp[sprite_pixel.palette as usize];
                     if sprite_pixel.palette_index == 0
                         || (sprite_pixel.priority && bg_palette_index != 0)
+                        || !ctx.memory.io.lcd.lcdc.obj_enable()
                     {
-                        Pixel::from_repr((ctx.memory.io.lcd.bgp >> (bg_palette_index * 2)) & 0b11)
+                        if ctx.memory.io.lcd.lcdc.bg_window_enable() {
+                            Pixel::from_repr(
+                                (ctx.memory.io.lcd.bgp >> (bg_palette_index * 2)) & 0b11,
+                            )
                             .unwrap()
+                        } else {
+                            Pixel::White
+                        }
                     } else {
                         Pixel::from_repr(
                             (sprite_palette >> (sprite_pixel.palette_index * 2)) & 0b11,
@@ -663,11 +711,19 @@ impl PPU {
                         .unwrap()
                     }
                 } else {
-                    Pixel::from_repr((ctx.memory.io.lcd.bgp >> (bg_palette_index * 2)) & 0b11)
-                        .unwrap()
+                    if ctx.memory.io.lcd.lcdc.bg_window_enable() {
+                        Pixel::from_repr((ctx.memory.io.lcd.bgp >> (bg_palette_index * 2)) & 0b11)
+                            .unwrap()
+                    } else {
+                        Pixel::White
+                    }
                 };
-                self.screen[ctx.memory.io.lcd.ly as usize * 160 + self.screen_x as usize] = colour;
+                if self.screen_x < 160 {
+                    self.screen[ctx.memory.io.lcd.ly as usize * 160 + self.screen_x as usize] =
+                        colour;
+                }
                 self.screen_x += 1;
+                self.sprites_fetched = false;
                 if self.screen_x == 160 {
                     self.current_mode = Mode::HBlank;
                     self.bg_fetcher_state.clear();
@@ -725,38 +781,9 @@ impl PPU {
         }
     }
 
-    // fn get_colour_from_pixel(pixel: FifoPixel, ctx: &mut Context) -> Pixel {
-    //     let FifoPixel {
-    //         palette_index,
-    //         source,
-    //     } = pixel;
-    //     let palette =
-    //     let colour = match source {
-    //         PixelSource::BG => ctx.memory.io.lcd.bgp;,
-    //         PixelSource::S0 => todo!(),
-    //         PixelSource::S1 => todo!(),
-    //         PixelSource::S2 => todo!(),
-    //         PixelSource::S3 => todo!(),
-    //         PixelSource::S4 => todo!(),
-    //         PixelSource::S5 => todo!(),
-    //         PixelSource::S6 => todo!(),
-    //         PixelSource::S7 => todo!(),
-    //         PixelSource::S8 => todo!(),
-    //         PixelSource::S9 => todo!(),
-    //     };
-    //     let colour = Pixel::from_repr((palette >> (palette_index * 2)) & 0b11).unwrap();
-    //     self.pixel_fifo.push_back(FifoPixel {
-    //         pixel: colour,
-    //         source: PixelSource::BG,
-    //     });
-    // }
-
     fn fetch_bg_tile(&mut self, ctx: &mut Context<MemoryBus>) {
         let first_fetch_offset = if self.first_tile_fetch { 0u8 } else { 8u8 };
-        let in_window = false
-            && self.screen_x >= ctx.memory.io.lcd.wx
-            && ctx.memory.io.lcd.ly >= ctx.memory.io.lcd.wy
-            && ctx.memory.io.lcd.lcdc.window_enable();
+        let in_window = self.in_window;
         let tile_map_area = if !in_window {
             ctx.memory.io.lcd.lcdc.bg_tile_map()
         } else {
@@ -767,12 +794,14 @@ impl PPU {
                 .wrapping_add(ctx.memory.io.lcd.scx)
                 .wrapping_add(first_fetch_offset)
         } else {
-            self.screen_x - ctx.memory.io.lcd.wx
+            self.screen_x
+                .wrapping_sub(ctx.memory.io.lcd.wx.wrapping_sub(7))
+                .wrapping_add(first_fetch_offset)
         };
         let tile_y = if !in_window {
             ctx.memory.io.lcd.ly.wrapping_add(ctx.memory.io.lcd.scy)
         } else {
-            ctx.memory.io.lcd.ly - ctx.memory.io.lcd.wy
+            self.window_row
         };
         self.bg_fetcher_state.tile_line = tile_y % 8;
         let tile_map_index = (((tile_y as u16) / 8) << 5) | (tile_x as u16 / 8);
@@ -805,7 +834,7 @@ impl PPU {
                             .sprite_tile_data(ctx.memory.io.lcd.lcdc.obj_size(), *tile_no)
                             .pipe(|data| {
                                 if *y_flip {
-                                    data[data.len() - 1 - *tile_line as usize * 2]
+                                    data[data.len() - 1 - (*tile_line as usize * 2 + 1)]
                                 } else {
                                     data[*tile_line as usize * 2]
                                 }
@@ -820,7 +849,7 @@ impl PPU {
                             .sprite_tile_data(ctx.memory.io.lcd.lcdc.obj_size(), *tile_no)
                             .pipe(|data| {
                                 if *y_flip {
-                                    data[data.len() - 1 - (*tile_line as usize * 2 + 1)]
+                                    data[data.len() - 1 - (*tile_line as usize * 2)]
                                 } else {
                                     data[*tile_line as usize * 2 + 1]
                                 }

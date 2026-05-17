@@ -4,7 +4,7 @@ use better_default::Default;
 use tap::Conv;
 use tracing::{debug, error};
 
-use crate::context::{self, Context, InterruptRegister, Io, Memory};
+use crate::context::{self, Context, InterruptRegister, Io, Memory, TimerRegisters};
 
 pub mod registers;
 
@@ -150,7 +150,6 @@ pub(crate) struct ExecuteState {
     value: u8,
     msb: u8,
     address: u16,
-    result: u16,
     condition_met: bool,
     carry: bool,
     three_quarter_carry: bool,
@@ -159,7 +158,9 @@ pub(crate) struct ExecuteState {
 }
 
 impl<T: Memory + Default> CPU<T> {
-    pub(crate) fn timer_tick(&mut self, ctx: &mut Context<T>) {}
+    pub(crate) fn timer_tick(&mut self, ctx: &mut Context<T>) {
+        ctx.memory.io_mut().tick_timer();
+    }
     pub fn increment_pc(&mut self, ctx: &mut Context<T>) {
         self.pc = self.pc.wrapping_add(1);
     }
