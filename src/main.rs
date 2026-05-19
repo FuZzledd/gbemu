@@ -1,33 +1,31 @@
 #![allow(clippy::upper_case_acronyms)]
 #![feature(uint_gather_scatter_bits)]
-use core::{cmp::min, iter, ops::RangeInclusive, time::Duration};
+#![feature(hash_map_macro)]
+use core::{cmp::min, iter, time::Duration};
 use std::{
-    collections::BTreeMap,
-    env, fs,
-    path::{Path, PathBuf},
-    rc::Rc,
+    collections::{BTreeMap, HashMap},
+    env, fs, hash_map,
+    path::PathBuf,
     sync::{
         Arc, Mutex,
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver},
     },
-    thread::{self, sleep},
+    thread::{self},
 };
 
 use better_default::Default;
 
 use bytes::{Bytes, BytesMut};
 use iced::{
-    Background, Element,
-    Length::{Fill, FillPortion, Shrink},
+    Element,
+    Length::Fill,
     Padding, Rectangle, Task, exit,
-    font::{self, Font},
+    font::Font,
     futures::SinkExt,
+    keyboard::{self, key::Physical},
     stream,
     time::every,
-    widget::{
-        self, image::Handle, operation::RelativeOffset, scrollable::Viewport, space::vertical,
-        text::primary,
-    },
+    widget::{self, image::Handle, scrollable::Viewport},
     window::Settings,
 };
 use iced::{
@@ -39,7 +37,6 @@ use iced::{
     window,
 };
 use tap::Pipe;
-use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt};
 
 use gbemu::{
@@ -107,7 +104,21 @@ struct App {
     redraw_requested: Option<Receiver<()>>,
     playback_controller: mpsc::Sender<bool>,
     subscription_sender: Option<iced::futures::channel::mpsc::Sender<Receiver<()>>>,
+    keybinds: HashMap<Physical, GameBoyButton>,
 }
+
+#[derive(Debug, Clone, Copy)]
+enum GameBoyButton {
+    Select,
+    Start,
+    A,
+    B,
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 #[derive(Default)]
 struct MemoryViewer {
     #[default(widget::Id::unique())]
@@ -236,6 +247,17 @@ impl App {
         let (redraw_requester, redraw_requested) = mpsc::channel::<()>();
         let (playback_controller, playback_receiver) = mpsc::channel::<bool>();
 
+        let keybinds = hash_map! {
+            Physical::Code(keyboard::key::Code::KeyW) => GameBoyButton::Up,
+            Physical::Code(keyboard::key::Code::KeyS) => GameBoyButton::Down,
+            Physical::Code(keyboard::key::Code::KeyA) => GameBoyButton::Left,
+            Physical::Code(keyboard::key::Code::KeyD) => GameBoyButton::Right,
+            Physical::Code(keyboard::key::Code::KeyJ) => GameBoyButton::A,
+            Physical::Code(keyboard::key::Code::KeyK) => GameBoyButton::B,
+            Physical::Code(keyboard::key::Code::Backspace) => GameBoyButton::Select,
+            Physical::Code(keyboard::key::Code::Enter) => GameBoyButton::Start,
+        };
+
         let app = App {
             windows: <BTreeMap<window::Id, Window> as core::default::Default>::default(),
             gameboy: <ThreadSafeGameBoy as core::default::Default>::default(),
@@ -246,7 +268,9 @@ impl App {
             redraw_requested: Some(redraw_requested),
             playback_controller,
             subscription_sender: None,
+            keybinds,
         };
+
         {
             let gameboy = app.gameboy.clone();
             thread::spawn(move || {
@@ -457,6 +481,27 @@ impl App {
                         .read_u8(self.memory_viewer.selected_address);
                 }
             }
+            Message::KeyboardEvent(event) => match event {
+                keyboard::Event::KeyPressed { physical_key, .. } => {
+                    if let Some(&button) = self.keybinds.get(&physical_key) {
+                        self.gameboy
+                            .0
+                            .lock()
+                            .unwrap()
+                            .set_joypad_state(button, false);
+                    }
+                }
+                keyboard::Event::KeyReleased { physical_key, .. } => {
+                    if let Some(&button) = self.keybinds.get(&physical_key) {
+                        self.gameboy
+                            .0
+                            .lock()
+                            .unwrap()
+                            .set_joypad_state(button, true);
+                    }
+                }
+                keyboard::Event::ModifiersChanged(modifiers) => {}
+            },
         }
         Task::none()
     }
@@ -465,6 +510,8 @@ impl App {
             window::Event::Closed => Some(Message::WindowClosed(id)),
             _ => None,
         });
+
+        let keyboard_events = keyboard::listen().map(|event| Message::KeyboardEvent(event));
 
         let redrawer = Subscription::run(|| {
             stream::channel(100, async move |mut output| {
@@ -485,6 +532,7 @@ impl App {
             window_events,
             redrawer,
             every(Duration::from_millis(8)).map(|_| Message::RedrawRequested),
+            keyboard_events,
         ])
     }
 
@@ -503,6 +551,7 @@ enum Message {
     SubscriberReady(iced::futures::channel::mpsc::Sender<Receiver<()>>),
     RedrawRequested,
     UpdateMemoryViewer,
+    KeyboardEvent(keyboard::Event),
 }
 #[derive(Clone, Debug, Copy)]
 
@@ -537,11 +586,11 @@ impl<Message> canvas::Program<Message> for TileViewer {
 
     fn draw(
         &self,
-        state: &Self::State,
+        _state: &Self::State,
         renderer: &Renderer,
-        theme: &iced_renderer::core::Theme,
+        _theme: &iced_renderer::core::Theme,
         bounds: iced::Rectangle,
-        cursor: iced::advanced::mouse::Cursor,
+        _cursor: iced::advanced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let screen = self.cache.draw(renderer, bounds.size(), |frame| {
             for y in 0..24 {
@@ -586,6 +635,7 @@ impl GameBoy {
     fn tick(&mut self, manual: bool) -> bool {
         if self.counter.is_multiple_of(4) {
             self.cpu.tick(&mut self.context);
+            self.context.memory.tick_oam_dma();
         }
         self.ppu.tick(&mut self.context);
 
@@ -612,6 +662,22 @@ impl GameBoy {
             return true;
         }
         false
+    }
+
+    fn set_joypad_state(&mut self, button: GameBoyButton, state: bool) {
+        let button_state = &mut self.context.memory.io.joypad.buttons_state;
+        let dpad_state = &mut self.context.memory.io.joypad.dpad_state;
+
+        match button {
+            GameBoyButton::Select => button_state.set(2, state),
+            GameBoyButton::Start => button_state.set(3, state),
+            GameBoyButton::A => button_state.set(0, state),
+            GameBoyButton::B => button_state.set(1, state),
+            GameBoyButton::Left => dpad_state.set(1, state),
+            GameBoyButton::Right => dpad_state.set(0, state),
+            GameBoyButton::Up => dpad_state.set(2, state),
+            GameBoyButton::Down => dpad_state.set(3, state),
+        }
     }
 }
 

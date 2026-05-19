@@ -9,46 +9,13 @@ use core::{
 use std::process::Output;
 
 use crate::context::{Context, InterruptRegister, Io, Memory, Memory8K, MemoryBus};
+use crate::{bit_getters, get_bit, set_bit};
 use array_deque::{ArrayDeque, StackArrayDeque};
 use better_default::Default;
 use bytemuck::TransparentWrapper;
 use paste::paste;
 use strum::FromRepr;
 use tap::Pipe;
-
-fn set_bit<T>(num: &mut T, index: u8, value: bool)
-where
-    T: BitAnd<T, Output = T> + BitOr<T, Output = T>,
-    T: From<bool> + Copy,
-    T: Shl<u8, Output = T>,
-    T: Not<Output = T>,
-{
-    *num = (*num & !(T::from(true) << index)) | (T::from(value) << index);
-}
-fn get_bit<T>(num: T, index: u8) -> bool
-where
-    T: BitAnd<T, Output = T> + BitOr<T, Output = T>,
-    T: From<bool> + Copy,
-    T: Shr<u8, Output = T>,
-    T: Not<Output = T>,
-    T: PartialEq,
-{
-    (num >> index) & T::from(true) == T::from(true)
-}
-
-macro_rules! bit_getters {
-    ($name:ident,$bit:literal) => {
-        fn $name(&self) -> bool {
-            get_bit(self.0, $bit)
-        }
-
-        paste! {
-            fn [<set_ $name>](&mut self, value: bool) {
-                set_bit(&mut self.0, $bit, value);
-            }
-        }
-    };
-}
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -156,6 +123,8 @@ pub struct LCDRegisters {
     wy: u8,
     wx: u8,
     start_dma: bool,
+    pub(crate) dma_source_address: u8,
+    pub(crate) dma_counter: Option<u8>,
 }
 
 impl LCDRegisters {
@@ -186,8 +155,7 @@ impl LCDRegisters {
             0x44 => {}
             0x45 => self.lyc = value,
             0x46 => {
-                self.dma = value;
-                self.start_dma = true;
+                self.initiate_oam_dma(value);
             }
             0x47 => self.bgp = value,
             0x48 => self.obp[0] = value,
@@ -196,6 +164,10 @@ impl LCDRegisters {
             0x4B => self.wx = value,
             _ => unreachable!(),
         }
+    }
+    fn initiate_oam_dma(&mut self, value: u8) {
+        self.dma_source_address = value;
+        self.dma_counter = Some(0);
     }
 }
 
@@ -722,7 +694,7 @@ impl PPU {
                     self.screen[ctx.memory.io.lcd.ly as usize * 160 + self.screen_x as usize] =
                         colour;
                 }
-                self.screen_x += 1;
+                self.screen_x = self.screen_x.wrapping_add(1);
                 self.sprites_fetched = false;
                 if self.screen_x == 160 {
                     self.current_mode = Mode::HBlank;
@@ -928,8 +900,8 @@ impl PPU {
 
 fn object_on_scanline(obj_y: u8, scanline_y: u8, size: ObjSize) -> bool {
     match size {
-        ObjSize::Square => (obj_y..(obj_y + 8)),
-        ObjSize::Tall => (obj_y..(obj_y + 16)),
+        ObjSize::Square => (obj_y..(obj_y.wrapping_add(8))),
+        ObjSize::Tall => (obj_y..(obj_y.wrapping_add(16))),
     }
-    .contains(&(scanline_y + 16))
+    .contains(&(scanline_y.wrapping_add(16)))
 }

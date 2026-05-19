@@ -4,7 +4,7 @@ use better_default::Default;
 use tap::Conv;
 use tracing::{debug, error};
 
-use crate::context::{self, Context, InterruptRegister, Io, Memory, TimerRegisters};
+use crate::context::{self, Context, InterruptRegister, Io, Memory};
 
 pub mod registers;
 
@@ -161,7 +161,7 @@ impl<T: Memory + Default> CPU<T> {
     pub(crate) fn timer_tick(&mut self, ctx: &mut Context<T>) {
         ctx.memory.io_mut().tick_timer();
     }
-    pub fn increment_pc(&mut self, ctx: &mut Context<T>) {
+    pub fn increment_pc(&mut self, _ctx: &mut Context<T>) {
         self.pc = self.pc.wrapping_add(1);
     }
 
@@ -170,6 +170,9 @@ impl<T: Memory + Default> CPU<T> {
     }
 
     pub fn load_rom(&mut self, rom: &[u8], ctx: &mut Context<T>) {
+        *self = Default::default();
+        self.load_debug_initial_state(ctx);
+        ctx.memory = Default::default();
         ctx.memory.load_rom(rom);
     }
 
@@ -207,13 +210,14 @@ impl<T: Memory + Default> CPU<T> {
     }
 
     pub fn tick(&mut self, ctx: &mut Context<T>) {
-        if self.halted && (ctx.memory.io().interrupt_flag().read() & ctx.memory.ie()) != 0 {
+        if self.halted && (ctx.memory.io().interrupt_flag().read() & ctx.memory.ie() & 0b11111) != 0
+        {
             self.halted = false;
             self.pc = self.pc.wrapping_add(1);
         }
 
         if let State::Decode(0) = self.state
-            && (ctx.memory.io().interrupt_flag().read() & ctx.memory.ie()) != 0
+            && (ctx.memory.io().interrupt_flag().read() & ctx.memory.ie() & 0b11111) != 0
             && self.ime
         {
             self.state = State::HandlingInterrupts(0);
@@ -243,9 +247,9 @@ impl<T: Memory + Default> CPU<T> {
                         self.registers.sp,
                         self.pc,
                         ctx.memory.read_u8(self.pc),
-                        ctx.memory.read_u8(self.pc + 1),
-                        ctx.memory.read_u8(self.pc + 2),
-                        ctx.memory.read_u8(self.pc + 3),
+                        ctx.memory.read_u8(self.pc.wrapping_add(1)),
+                        ctx.memory.read_u8(self.pc.wrapping_add(2)),
+                        ctx.memory.read_u8(self.pc.wrapping_add(3)),
                     );
                     self.ir = ctx.memory.read_u8(self.pc);
                     self.pc = self.pc.wrapping_add(1);
@@ -264,7 +268,7 @@ impl<T: Memory + Default> CPU<T> {
         };
         match step {
             0 => {
-                let masked = ctx.memory.io().interrupt_flag().read() & ctx.memory.ie();
+                let masked = ctx.memory.io().interrupt_flag().read() & ctx.memory.ie() & 0b11111;
                 let next_interrupt = if masked & 0b1 != 0 {
                     context::InterruptType::VBlank
                 } else if masked & 0b10 != 0 {
@@ -276,14 +280,18 @@ impl<T: Memory + Default> CPU<T> {
                 } else if masked & 0b10000 != 0 {
                     context::InterruptType::Joypad
                 } else {
-                    panic!()
+                    panic!(
+                        "Invalid interrupt: IF: 0x{:02X}, IE: 0x{:02X}",
+                        ctx.memory.io().interrupt_flag().read(),
+                        ctx.memory.ie()
+                    )
                 };
                 let address = match next_interrupt {
-                    context::InterruptType::Joypad => 0x0060,
-                    context::InterruptType::Serial => 0x0058,
-                    context::InterruptType::Timer => 0x0050,
-                    context::InterruptType::LCD => 0x0048,
                     context::InterruptType::VBlank => 0x0040,
+                    context::InterruptType::LCD => 0x0048,
+                    context::InterruptType::Timer => 0x0050,
+                    context::InterruptType::Serial => 0x0058,
+                    context::InterruptType::Joypad => 0x0060,
                 };
                 ctx.memory
                     .io_mut()
@@ -1678,10 +1686,14 @@ impl<T: Memory + Default> CPU<T> {
         match source {
             Target::R8(register) => self.load8(destination, self.read_register8(register), ctx, 0),
             Target::Imm8(value) => self.load8(destination, value, ctx, 0),
-            Target::R16(register) => {
-                self.load16(destination, self.read_register16(register), ctx, 0)
-            }
-            Target::Imm16(value) => self.load16(destination, value, ctx, 0),
+            Target::R16(register) => self.load16(
+                destination,
+                self.read_register16(register),
+                ctx,
+                0,
+                matches!(destination, Target::R16(_)),
+            ),
+            Target::Imm16(value) => self.load16(destination, value, ctx, 0, false),
             Target::Ind(indirect) => match step {
                 0 => match indirect {
                     Indirect::R16(register) => {
@@ -1764,6 +1776,7 @@ impl<T: Memory + Default> CPU<T> {
         value: u16,
         ctx: &mut Context<T>,
         starting_step: usize,
+        special_register_load: bool,
     ) {
         let State::Execute(_, step) = self.state else {
             unreachable!()
@@ -1774,6 +1787,9 @@ impl<T: Memory + Default> CPU<T> {
             Target::R16(register) => match step {
                 x if x == starting_step => {
                     self.set_register16(register, value);
+                    if !special_register_load {
+                        self.state = State::ExecutionDone;
+                    }
                 }
                 x if x == starting_step + 1 => {
                     self.state = State::ExecutionDone;
@@ -1961,7 +1977,7 @@ impl<T: Memory + Default> CPU<T> {
         todo!()
     }
 
-    pub(crate) fn jump(&mut self, condition: Condition, target: Target, ctx: &mut Context<T>) {
+    pub(crate) fn jump(&mut self, condition: Condition, target: Target, _ctx: &mut Context<T>) {
         // debug!("Jump! {target:?}");
         let State::Execute(_, step) = self.state else {
             unreachable!()
@@ -1994,7 +2010,12 @@ impl<T: Memory + Default> CPU<T> {
         }
     }
 
-    pub(crate) fn jump_relative(&mut self, condition: Condition, offset: i8, ctx: &mut Context<T>) {
+    pub(crate) fn jump_relative(
+        &mut self,
+        condition: Condition,
+        offset: i8,
+        _ctx: &mut Context<T>,
+    ) {
         let State::Execute(_, step) = self.state else {
             unreachable!()
         };

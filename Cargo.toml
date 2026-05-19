@@ -11,6 +11,7 @@ name = "cpu"
 anyhow = "1.0.102"
 array-deque = "0.4.0"
 better_default = "1.0.5"
+bitvec = "1.0.1"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 bytes = "1.11.1"
 dioxus-devtools = "0.7.9"

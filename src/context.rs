@@ -1,7 +1,14 @@
+use core::ops::BitAnd;
+
 use better_default::Default;
+use bitvec::{access::BitSafe, prelude::*};
+use bytemuck::TransparentWrapper;
 use tracing::debug;
 
-use crate::ppu::{LCDRegisters, Oam, Vram};
+use crate::{
+    bit_getters,
+    ppu::{LCDRegisters, Oam, Vram},
+};
 
 pub(crate) type Memory16K = [u8; 1024 * 16];
 
@@ -17,17 +24,56 @@ pub struct IoRegisters {
     pub interrupt: InterruptFlag,
     pub lcd: LCDRegisters,
 }
+#[derive(Default, TransparentWrapper)]
+#[repr(transparent)]
+struct RawJoypadRegister(#[default(0b11001111)] u8);
+
+impl RawJoypadRegister {
+    bit_getters!(select_buttons, 5);
+    bit_getters!(select_dpad, 4);
+
+    bit_getters!(start_down, 3);
+    bit_getters!(select_up, 2);
+    bit_getters!(b_left, 1);
+    bit_getters!(a_right, 0);
+}
 
 #[derive(Default)]
-pub struct JoypadRegister;
+pub struct JoypadRegister {
+    buttons_selected: bool,
+    dpad_selected: bool,
+    #[default(bitvec!(u8, Lsb0; 1; 4))]
+    pub buttons_state: BitVec<u8>,
+    #[default(bitvec!(u8, Lsb0; 1; 4))]
+    pub dpad_state: BitVec<u8>,
+}
 
 impl JoypadRegister {
     pub(crate) fn read(&self) -> u8 {
-        0xFF // todo!()
+        let state = if !self.buttons_selected {
+            self.buttons_state.clone()
+        } else {
+            bitvec![ u8, Lsb0; 1; 4]
+        } & if !self.dpad_selected {
+            self.dpad_state.clone()
+        } else {
+            bitvec![u8, Lsb0; 1; 4]
+        };
+
+        let mut selected = BitVec::new();
+        selected.push(self.dpad_selected);
+        selected.push(self.buttons_selected);
+
+        let mut return_value = bitvec![u8, Lsb0; 1; 8];
+        return_value[4..6].copy_from_bitslice(&selected);
+        return_value[0..4].copy_from_bitslice(&state);
+
+        return_value.load::<u8>()
     }
 
-    pub(crate) fn write(&mut self, _value: u8) {
-        // todo!()
+    pub(crate) fn write(&mut self, value: u8) {
+        self.buttons_selected = 0b1 & value >> 5 == 0b1;
+        self.dpad_selected = 0b1 & value >> 4 == 0b1;
     }
 }
 
@@ -307,10 +353,17 @@ impl MemoryBus {
 
     pub fn write_u8(&mut self, address: u16, value: u8) {
         match address {
-            0x0000..=0x3FFF => self.rom[address as usize] = value,
+            0x0000..=0x3FFF => {
+                println!(
+                    "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
+                )
+            } //self.rom[address as usize] = value,
             0x4000..=0x7FFF => {
                 // TODO: switchable rom banks
-                self.rom_banks[0][address as usize - 0x4000] = value
+                //self.rom_banks[0][address as usize - 0x4000] = value
+                println!(
+                    "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
+                )
             }
             0x8000..=0x9FFF => self.vram[address as usize - 0x8000] = value,
             0xA000..=0xBFFF => self.external_ram[address as usize - 0xA000] = value,
@@ -354,6 +407,8 @@ pub trait Memory {
 
     fn load_boot_rom(&mut self, rom: &[u8]);
     fn load_rom(&mut self, rom: &[u8]);
+
+    fn tick_oam_dma(&mut self);
 }
 
 impl Memory for MemoryBus {
@@ -388,6 +443,25 @@ impl Memory for MemoryBus {
     fn load_rom(&mut self, rom: &[u8]) {
         self.rom.copy_from_slice(&rom[..1024 * 16]);
         self.rom_banks[0].copy_from_slice(&rom[1024 * 16..]);
+    }
+
+    fn tick_oam_dma(&mut self) {
+        self.io.lcd.dma_counter = if let Some(counter) = self.io.lcd.dma_counter {
+            if counter > 0 {
+                let offset = counter - 1;
+
+                let source_address = self.io.lcd.dma_source_address;
+                let value = self.read_u8(u16::from_le_bytes([offset, source_address]));
+                self.write_u8(u16::from_le_bytes([offset, 0xFE]), value);
+            }
+            if counter == 159 {
+                None
+            } else {
+                Some(counter + 1)
+            }
+        } else {
+            None
+        };
     }
 }
 
@@ -474,6 +548,8 @@ impl Memory for FlatMemory {
     fn load_rom(&mut self, _rom: &[u8]) {
         todo!()
     }
+
+    fn tick_oam_dma(&mut self) {}
 }
 
 impl Io for FlatMemory {
