@@ -101,9 +101,10 @@ struct App {
     memory_viewer: MemoryViewer,
     is_playing: bool,
     frame_count: u64,
-    redraw_requested: Option<Receiver<()>>,
-    playback_controller: mpsc::Sender<bool>,
-    subscription_sender: Option<iced::futures::channel::mpsc::Sender<Receiver<()>>>,
+    redraw_requested: Option<iced::futures::channel::mpsc::Receiver<()>>,
+    playback_controller: std::sync::mpsc::Sender<bool>,
+    subscription_sender:
+        Option<iced::futures::channel::mpsc::Sender<iced::futures::channel::mpsc::Receiver<()>>>,
     keybinds: HashMap<Physical, GameBoyButton>,
 }
 
@@ -244,7 +245,8 @@ impl App {
         let (_, tile_viewer) = window::open(Settings::default());
         let (_, memory_viewer) = window::open(Settings::default());
 
-        let (redraw_requester, redraw_requested) = mpsc::channel::<()>();
+        let (mut redraw_requester, redraw_requested) =
+            iced::futures::channel::mpsc::channel::<()>(100);
         let (playback_controller, playback_receiver) = mpsc::channel::<bool>();
 
         let keybinds = hash_map! {
@@ -284,7 +286,8 @@ impl App {
                             let mut gameboy = gameboy.0.lock().unwrap();
                             let redraw_request = gameboy.tick(false);
                             if redraw_request {
-                                redraw_requester.send(());
+                                let _ =
+                                    iced::futures::executor::block_on(redraw_requester.send(()));
                             }
                         }
 
@@ -400,7 +403,6 @@ impl App {
                 GameBoyMessage::TogglePlayback => {
                     self.is_playing = !self.is_playing;
                     self.playback_controller.send(self.is_playing).unwrap();
-                    println!("{}", self.is_playing);
                 }
             },
             Message::WindowOpened(id, window_type) => {
@@ -421,8 +423,8 @@ impl App {
             }
             Message::SubscriberReady(mut sender) => {
                 if let Some(redraw_requested) = self.redraw_requested.take() {
-                    sender.send(redraw_requested);
-                    self.subscription_sender = Some(sender);
+                    return Task::future(async move { sender.send(redraw_requested).await })
+                        .discard();
                 }
             }
             Message::RedrawRequested => {
@@ -519,9 +521,9 @@ impl App {
 
                 output.send(Message::SubscriberReady(tx)).await.unwrap();
 
-                let redraw_requested = rx.recv().await.unwrap();
+                let mut redraw_requested = rx.recv().await.unwrap();
                 loop {
-                    if let Ok(()) = redraw_requested.recv() {
+                    if let Ok(()) = redraw_requested.recv().await {
                         output.send(Message::RedrawRequested).await.unwrap();
                     }
                 }
@@ -531,7 +533,7 @@ impl App {
         Subscription::batch([
             window_events,
             redrawer,
-            every(Duration::from_millis(8)).map(|_| Message::RedrawRequested),
+            // every(Duration::from_nanos(16742706 * 2)).map(|_| Message::RedrawRequested),
             keyboard_events,
         ])
     }
@@ -548,7 +550,9 @@ enum Message {
     GameBoyMessage(GameBoyMessage),
     WindowClosed(window::Id),
     MemoryViewerMessage(MemoryViewerMessage),
-    SubscriberReady(iced::futures::channel::mpsc::Sender<Receiver<()>>),
+    SubscriberReady(
+        iced::futures::channel::mpsc::Sender<iced::futures::channel::mpsc::Receiver<()>>,
+    ),
     RedrawRequested,
     UpdateMemoryViewer,
     KeyboardEvent(keyboard::Event),

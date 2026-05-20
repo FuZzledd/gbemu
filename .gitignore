@@ -29,3 +29,7 @@ log.txt
 perf.data
 profile.json.gz
 flamegraph.svg
+
+rom_16Mb.gb
+rom_32Mb.gb
+rom_64Mb.gb
