@@ -16,6 +16,7 @@ use bytemuck::TransparentWrapper;
 use paste::paste;
 use strum::FromRepr;
 use tap::Pipe;
+use tracing::instrument;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -506,6 +507,7 @@ impl SpriteFetcherState {
 }
 
 impl PPU {
+    #[instrument(skip_all)]
     pub fn tick(&mut self, ctx: &mut Context<MemoryBus>) {
         match self.current_mode {
             Mode::OamScan => {
@@ -558,6 +560,7 @@ impl PPU {
             .lcd
             .stat
             .set_lyc_equal(ctx.memory.io.lcd.ly == ctx.memory.io.lcd.lyc);
+        ctx.memory.io.lcd.stat.set_ppu_mode(self.current_mode);
         let stat_line = (ctx.memory.io.lcd.stat.lyc_select() && ctx.memory.io.lcd.stat.lyc_equal())
             || (ctx.memory.io.lcd.stat.mode_2() && self.current_mode == Mode::OamScan)
             || (ctx.memory.io.lcd.stat.mode_1() && self.current_mode == Mode::VBlank)

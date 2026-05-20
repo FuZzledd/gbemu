@@ -1,11 +1,17 @@
 use core::ops::BitAnd;
+use std::{
+    io::{self, Write},
+    process::Output,
+};
 
 use better_default::Default;
 use bitvec::{access::BitSafe, prelude::*};
 use bytemuck::TransparentWrapper;
+use serde::de::value;
 use tracing::debug;
 
 use crate::{
+    apu::{AudioRegister, AudioRegisters},
     bit_getters,
     ppu::{LCDRegisters, Oam, Vram},
 };
@@ -19,25 +25,12 @@ pub(crate) type Memory4K = [u8; 1024 * 4];
 #[derive(Default)]
 pub struct IoRegisters {
     pub joypad: JoypadRegister,
-    pub serial: SerialTransferRegisters,
+    pub serial: Serial,
     pub timer: Timer,
     pub interrupt: InterruptFlag,
     pub lcd: LCDRegisters,
+    pub audio: AudioRegisters,
 }
-#[derive(Default, TransparentWrapper)]
-#[repr(transparent)]
-struct RawJoypadRegister(#[default(0b11001111)] u8);
-
-impl RawJoypadRegister {
-    bit_getters!(select_buttons, 5);
-    bit_getters!(select_dpad, 4);
-
-    bit_getters!(start_down, 3);
-    bit_getters!(select_up, 2);
-    bit_getters!(b_left, 1);
-    bit_getters!(a_right, 0);
-}
-
 #[derive(Default)]
 pub struct JoypadRegister {
     buttons_selected: bool,
@@ -78,16 +71,86 @@ impl JoypadRegister {
 }
 
 #[derive(Default)]
-pub struct SerialTransferRegisters;
+pub struct Serial {
+    serial_data: u8,
+    serial_control: SerialControlRegister,
+    transfer_status: u8,
+    output_byte: u8,
+}
 
-impl SerialTransferRegisters {
-    pub(crate) fn read(&self, _address: u8) -> u8 {
-        // todo!()
-        0xFF
+#[repr(transparent)]
+#[derive(Default, TransparentWrapper)]
+pub struct SerialControlRegister(#[default(0b01111111)] u8);
+impl SerialControlRegister {
+    bit_getters!(transfer_enable, 7);
+    bit_getters!(clock_speed, 1);
+    bit_getters!(clock_select, 0);
+
+    fn read(&self) -> u8 {
+        self.0 | 0b01111100
     }
 
-    pub(crate) fn write(&mut self, _address: u8, _value: u8) {
-        //todo!()
+    fn write(&mut self, value: u8) {
+        self.0 = value | 0b01111100;
+    }
+}
+
+impl Serial {
+    pub fn tick(ctx: &mut Context<MemoryBus>) {
+        let serial = &mut ctx.memory.io.serial;
+        if serial.serial_control.transfer_enable() && serial.serial_control.clock_select() {
+            if serial.transfer_status == 0 {
+                serial.output_byte = 0;
+            }
+
+            serial.output_byte |= serial.serial_data >> 7;
+
+            if serial.transfer_status == 7 {
+                ctx.memory
+                    .io
+                    .interrupt
+                    .schedule_interrupt(InterruptType::Serial);
+                println!("scheduling serial interrupt");
+                serial.serial_control.set_transfer_enable(false);
+                // print!(
+                //     "{}",
+                //     char::from_u32(serial.output_byte as u32).unwrap()
+                // );
+                // let _ = io::stdout().flush();
+            }
+
+            serial.output_byte <<= 1;
+            serial.serial_data = (serial.serial_data << 1) | 0b1;
+            // TODO: Shift in input data
+
+            serial.transfer_status = (serial.transfer_status + 1) % 8;
+        }
+    }
+}
+
+pub trait SerialRegisters {
+    fn read(&self, _address: u8) -> u8;
+
+    fn write(&mut self, _address: u8, _value: u8);
+}
+
+impl SerialRegisters for Serial {
+    fn read(&self, address: u8) -> u8 {
+        match address {
+            0x00 => unreachable!(),
+            0x01 => self.serial_data,
+            0x02 => self.serial_control.read(),
+            0x03.. => unreachable!(),
+        }
+    }
+
+    fn write(&mut self, address: u8, value: u8) {
+        match address {
+            0x00 => unreachable!(),
+            0x01 => self.serial_data = value,
+            0x02 => self.serial_control.write(value),
+            0x03.. => unreachable!(),
+        }
     }
 }
 
@@ -197,7 +260,7 @@ impl Timer {
     }
 }
 
-impl TimerRegisters for Timer {
+impl TimerRegister for Timer {
     fn tick(&mut self, interrupts: &mut impl InterruptRegister) {
         self.tima_written = false;
         let tima_overflow = self.tima_overflow;
@@ -206,6 +269,10 @@ impl TimerRegisters for Timer {
         if let Some(tma) = tima_overflow {
             self.handle_overflow(tma, interrupts);
         }
+    }
+
+    fn div(&self) -> u8 {
+        self.read(0x04)
     }
 }
 
@@ -258,9 +325,7 @@ impl IoRegisters {
             0x04..=0x07 => self.timer.read(address),
             0x08..0x0F => unimplemented_io_read(address),
             0x0F => self.interrupt.read(),
-            0x10..=0x26 => unimplemented_io_read(address),
-            0x27..0x30 => unimplemented_io_read(address),
-            0x30..=0x3F => unimplemented_io_read(address),
+            0x10..=0x3F => self.audio.read_u8(address),
             0x40..=0x4B => self.lcd.read(address),
 
             0x50 => {
@@ -283,9 +348,7 @@ impl IoRegisters {
             0x04..=0x07 => self.timer.write(address, value),
             0x08..0x0F => unimplemented_io_write(address, value),
             0x0F => self.interrupt.write(value),
-            0x10..=0x26 => unimplemented_io_write(address, value),
-            0x27..0x30 => unimplemented_io_write(address, value),
-            0x30..=0x3F => unimplemented_io_write(address, value),
+            0x10..=0x3F => self.audio.write_u8(address, value),
             0x40..=0x4B => self.lcd.write(address, value),
 
             0x50 => {
@@ -466,21 +529,29 @@ impl Memory for MemoryBus {
 }
 
 pub trait Io {
-    fn timer(&self) -> &impl TimerRegisters;
-    fn timer_mut(&mut self) -> &mut impl TimerRegisters;
+    fn serial(&self) -> &impl SerialRegisters;
+
+    fn serial_mut(&mut self) -> &mut impl SerialRegisters;
+
+    fn timer(&self) -> &impl TimerRegister;
+    fn timer_mut(&mut self) -> &mut impl TimerRegister;
 
     fn interrupt_flag(&self) -> &impl InterruptRegister;
     fn interrupt_flag_mut(&mut self) -> &mut impl InterruptRegister;
+
+    fn audio(&self) -> &impl AudioRegister;
+
+    fn audio_mut(&mut self) -> &mut impl AudioRegister;
 
     fn tick_timer(&mut self);
 }
 
 impl Io for IoRegisters {
-    fn timer(&self) -> &impl TimerRegisters {
+    fn timer(&self) -> &impl TimerRegister {
         &self.timer
     }
 
-    fn timer_mut(&mut self) -> &mut impl TimerRegisters {
+    fn timer_mut(&mut self) -> &mut impl TimerRegister {
         &mut self.timer
     }
 
@@ -495,10 +566,28 @@ impl Io for IoRegisters {
     fn tick_timer(&mut self) {
         self.timer.tick(&mut self.interrupt);
     }
+
+    fn audio(&self) -> &impl AudioRegister {
+        &self.audio
+    }
+
+    fn audio_mut(&mut self) -> &mut impl AudioRegister {
+        &mut self.audio
+    }
+
+    fn serial(&self) -> &impl SerialRegisters {
+        &self.serial
+    }
+
+    fn serial_mut(&mut self) -> &mut impl SerialRegisters {
+        &mut self.serial
+    }
 }
 
-pub trait TimerRegisters {
+pub trait TimerRegister {
     fn tick(&mut self, interrupts: &mut impl InterruptRegister);
+
+    fn div(&self) -> u8;
 }
 
 pub trait InterruptRegister {
@@ -553,11 +642,11 @@ impl Memory for FlatMemory {
 }
 
 impl Io for FlatMemory {
-    fn timer(&self) -> &impl TimerRegisters {
+    fn timer(&self) -> &impl TimerRegister {
         self
     }
 
-    fn timer_mut(&mut self) -> &mut impl TimerRegisters {
+    fn timer_mut(&mut self) -> &mut impl TimerRegister {
         self
     }
 
@@ -572,9 +661,28 @@ impl Io for FlatMemory {
     fn tick_timer(&mut self) {
         // self.tick(interrupts);
     }
+
+    fn audio(&self) -> &impl AudioRegister {
+        self
+    }
+
+    fn audio_mut(&mut self) -> &mut impl AudioRegister {
+        self
+    }
+
+    fn serial(&self) -> &impl SerialRegisters {
+        self
+    }
+
+    fn serial_mut(&mut self) -> &mut impl SerialRegisters {
+        self
+    }
 }
-impl TimerRegisters for FlatMemory {
+impl TimerRegister for FlatMemory {
     fn tick(&mut self, _interrupts: &mut impl InterruptRegister) {}
+    fn div(&self) -> u8 {
+        self.0[0xFF04]
+    }
 }
 
 impl InterruptRegister for FlatMemory {
@@ -591,5 +699,179 @@ impl InterruptRegister for FlatMemory {
 
     fn clear_interrupt(&mut self, interrupt: InterruptType) {
         self.0[0xFF0F] &= !(1 << (interrupt as u8));
+    }
+}
+
+use crate::apu::registers;
+
+impl AudioRegister for FlatMemory {
+    fn nr10_mut(&mut self) -> &mut registers::ChannelSweep {
+        todo!()
+    }
+
+    fn nr11_mut(&mut self) -> &mut registers::ChannelLengthTimerWithDuty {
+        todo!()
+    }
+
+    fn nr12_mut(&mut self) -> &mut registers::ChannelVolumeEnvelope {
+        todo!()
+    }
+
+    fn nr13_14_mut(&mut self) -> &mut registers::ChannelPeriodControl {
+        todo!()
+    }
+
+    fn nr21_mut(&mut self) -> &mut registers::ChannelLengthTimerWithDuty {
+        todo!()
+    }
+
+    fn nr22_mut(&mut self) -> &mut registers::ChannelVolumeEnvelope {
+        todo!()
+    }
+
+    fn nr23_24_mut(&mut self) -> &mut registers::ChannelPeriodControl {
+        todo!()
+    }
+
+    fn nr30_mut(&mut self) -> &mut registers::ChannelDacEnable {
+        todo!()
+    }
+
+    fn nr31_mut(&mut self) -> &mut registers::ChannelLengthTimer {
+        todo!()
+    }
+
+    fn nr32_mut(&mut self) -> &mut registers::ChannelVolume {
+        todo!()
+    }
+
+    fn nr33_34_mut(&mut self) -> &mut registers::ChannelPeriodControl {
+        todo!()
+    }
+
+    fn nr41_mut(&mut self) -> &mut registers::ChannelLengthTimer {
+        todo!()
+    }
+
+    fn nr42_mut(&mut self) -> &mut registers::ChannelVolumeEnvelope {
+        todo!()
+    }
+
+    fn nr43_mut(&mut self) -> &mut registers::ChannelFrequencyRandomness {
+        todo!()
+    }
+
+    fn nr44_mut(&mut self) -> &mut registers::ChannelControl {
+        todo!()
+    }
+
+    fn nr50_mut(&mut self) -> &mut registers::AudioVolume {
+        todo!()
+    }
+
+    fn nr51_mut(&mut self) -> &mut registers::AudioPanning {
+        todo!()
+    }
+
+    fn nr52_mut(&mut self) -> &mut registers::AudioEnable {
+        todo!()
+    }
+
+    fn nr10(&self) -> &registers::ChannelSweep {
+        todo!()
+    }
+
+    fn nr11(&self) -> &registers::ChannelLengthTimerWithDuty {
+        todo!()
+    }
+
+    fn nr12(&self) -> &registers::ChannelVolumeEnvelope {
+        todo!()
+    }
+
+    fn nr13_14(&self) -> &registers::ChannelPeriodControl {
+        todo!()
+    }
+
+    fn nr21(&self) -> &registers::ChannelLengthTimerWithDuty {
+        todo!()
+    }
+
+    fn nr22(&self) -> &registers::ChannelVolumeEnvelope {
+        todo!()
+    }
+
+    fn nr23_24(&self) -> &registers::ChannelPeriodControl {
+        todo!()
+    }
+
+    fn nr30(&self) -> &registers::ChannelDacEnable {
+        todo!()
+    }
+
+    fn nr31(&self) -> &registers::ChannelLengthTimer {
+        todo!()
+    }
+
+    fn nr32(&self) -> &registers::ChannelVolume {
+        todo!()
+    }
+
+    fn nr33_34(&self) -> &registers::ChannelPeriodControl {
+        todo!()
+    }
+
+    fn nr41(&self) -> &registers::ChannelLengthTimer {
+        todo!()
+    }
+
+    fn nr42(&self) -> &registers::ChannelVolumeEnvelope {
+        todo!()
+    }
+
+    fn nr43(&self) -> &registers::ChannelFrequencyRandomness {
+        todo!()
+    }
+
+    fn nr44(&self) -> &registers::ChannelControl {
+        todo!()
+    }
+
+    fn nr50(&self) -> &registers::AudioVolume {
+        todo!()
+    }
+
+    fn nr51(&self) -> &registers::AudioPanning {
+        todo!()
+    }
+
+    fn nr52(&self) -> &registers::AudioEnable {
+        todo!()
+    }
+
+    fn wave_pattern_ram(&self) -> &[u8; 16] {
+        todo!()
+    }
+
+    fn wave_pattern_ram_mut(&mut self) -> &mut [u8; 16] {
+        todo!()
+    }
+
+    fn write_u8(&mut self, address: u8, value: u8) {
+        todo!()
+    }
+
+    fn read_u8(&self, address: u8) -> u8 {
+        todo!()
+    }
+}
+
+impl SerialRegisters for FlatMemory {
+    fn read(&self, _address: u8) -> u8 {
+        todo!()
+    }
+
+    fn write(&mut self, _address: u8, _value: u8) {
+        todo!()
     }
 }

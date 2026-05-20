@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use better_default::Default;
 use tap::Conv;
-use tracing::{debug, error};
+use tracing::{debug, error, instrument};
 
 use crate::context::{self, Context, InterruptRegister, Io, Memory};
 
@@ -209,6 +209,7 @@ impl<T: Memory + Default> CPU<T> {
         )
     }
 
+    #[instrument(skip_all)]
     pub fn tick(&mut self, ctx: &mut Context<T>) {
         if self.halted && (ctx.memory.io().interrupt_flag().read() & ctx.memory.ie() & 0b11111) != 0
         {

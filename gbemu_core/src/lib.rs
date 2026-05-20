@@ -2,6 +2,7 @@
 
 use core::ops::{BitAnd, BitOr, Not, Shl, Shr};
 
+pub mod apu;
 pub mod context;
 pub mod cpu;
 pub mod opcode;

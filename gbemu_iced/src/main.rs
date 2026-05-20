@@ -1,30 +1,41 @@
 #![allow(clippy::upper_case_acronyms)]
 #![feature(uint_gather_scatter_bits)]
 #![feature(hash_map_macro)]
-use core::{cmp::min, iter, time::Duration};
+#![allow(unused)]
+use core::{
+    cmp::{self, min},
+    iter, mem,
+    num::NonZero,
+    sync::atomic::{AtomicBool, AtomicU64},
+    time::Duration,
+};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     env, fs, hash_map,
     path::PathBuf,
     sync::{
-        Arc, Mutex,
+        Arc, LazyLock,
         mpsc::{self, Receiver},
     },
     thread::{self},
+    time::Instant,
 };
 
+use array_deque::StackArrayDeque;
 use better_default::Default;
+
+use itertools::Itertools;
+use parking_lot::Mutex;
 
 use bytes::{Bytes, BytesMut};
 use iced::{
     Element,
     Length::Fill,
-    Padding, Rectangle, Task, exit,
+    Padding, Point, Rectangle, Size, Task, Vector, exit,
     font::Font,
     futures::SinkExt,
     keyboard::{self, key::Physical},
     stream,
-    time::every,
     widget::{self, image::Handle, scrollable::Viewport},
     window::Settings,
 };
@@ -36,14 +47,28 @@ use iced::{
     widget::{column, *},
     window,
 };
+use rodio::{
+    MixerDeviceSink, Source,
+    conversions::SampleTypeConverter,
+    source::{FromIter, SquareWave, from_iter},
+};
+use spin_sleep::{SpinSleeper, sleep};
 use tap::Pipe;
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing::{info, instrument};
+use tracing_flame::FlameLayer;
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-use gbemu::{
+use gbemu_core::{
+    apu::{self},
     context::{Context, Memory, MemoryBus},
     cpu,
     ppu::{self, Mode},
 };
+
+pub static DEBUG_CHANNEL: LazyLock<(
+    crossbeam::channel::Sender<f64>,
+    crossbeam::channel::Receiver<f64>,
+)> = LazyLock::new(crossbeam::channel::unbounded);
 
 fn main() -> iced::Result {
     let format = fmt::format()
@@ -52,9 +77,13 @@ fn main() -> iced::Result {
         .without_time()
         .compact();
 
+    let (flame_layer, _guard) = FlameLayer::with_file("../../tracing.folded").unwrap();
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .event_format(format)
+        .finish()
+        .with(flame_layer)
         .init();
 
     iced::daemon(App::new, App::update, App::view)
@@ -101,11 +130,14 @@ struct App {
     memory_viewer: MemoryViewer,
     is_playing: bool,
     frame_count: u64,
-    redraw_requested: Option<iced::futures::channel::mpsc::Receiver<()>>,
+    redraw_requested: Arc<AtomicBool>,
     playback_controller: std::sync::mpsc::Sender<bool>,
     subscription_sender:
         Option<iced::futures::channel::mpsc::Sender<iced::futures::channel::mpsc::Receiver<()>>>,
     keybinds: HashMap<Physical, GameBoyButton>,
+    rodio_handle: MixerDeviceSink,
+    prev_frame_time: Instant,
+    frame_rate: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -239,14 +271,67 @@ impl From<MemoryViewerMessage> for Message {
     }
 }
 
+struct GameboyAudioChannelSource {
+    buffer_buffer: Arc<Mutex<VecDeque<Vec<i16>>>>,
+    capacitor: f64,
+    prev: f64,
+    current_buffer: Box<dyn Iterator<Item = f64> + Send>,
+}
+impl GameboyAudioChannelSource {
+    fn new(buffer_buffer: Arc<Mutex<VecDeque<Vec<i16>>>>) -> Self {
+        Self {
+            capacitor: 0.0,
+            current_buffer: Box::new(None.into_iter()),
+            buffer_buffer,
+            prev: 0.0,
+        }
+    }
+}
+
+impl Iterator for GameboyAudioChannelSource {
+    type Item = f64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(val) = self.current_buffer.next() {
+            let out = val - self.capacitor;
+            self.capacitor = val - out * 0.996;
+            self.prev = out;
+            Some(out)
+        } else {
+            if let Some(buffer) = self.buffer_buffer.lock().pop_front() {
+                self.current_buffer = Box::new(SampleTypeConverter::new(buffer.into_iter()));
+            } else {
+                return Some(0.0);
+            }
+            self.next()
+        }
+    }
+}
+
+impl rodio::Source for GameboyAudioChannelSource {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        NonZero::new(1).unwrap()
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        NonZero::new(48000).unwrap()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+}
+
 impl App {
     fn new() -> (Self, Task<Message>) {
         let (_, main_window) = window::open(Settings::default());
         let (_, tile_viewer) = window::open(Settings::default());
         let (_, memory_viewer) = window::open(Settings::default());
 
-        let (mut redraw_requester, redraw_requested) =
-            iced::futures::channel::mpsc::channel::<()>(100);
         let (playback_controller, playback_receiver) = mpsc::channel::<bool>();
 
         let keybinds = hash_map! {
@@ -260,21 +345,38 @@ impl App {
             Physical::Code(keyboard::key::Code::Enter) => GameBoyButton::Start,
         };
 
+        let mut gameboy = ThreadSafeGameBoy::default();
+
+        let rodio_handle;
+        {
+            let gameboy = Arc::get_mut(&mut gameboy.0).unwrap().get_mut();
+            gameboy.apu.debug_sender = Some(DEBUG_CHANNEL.0.clone());
+            rodio_handle =
+                rodio::DeviceSinkBuilder::open_default_sink().expect("Open default audio stream");
+            rodio_handle.mixer().add(GameboyAudioChannelSource::new(
+                gameboy.apu.channel1_output.clone(),
+            ));
+        }
+
         let app = App {
             windows: <BTreeMap<window::Id, Window> as core::default::Default>::default(),
-            gameboy: <ThreadSafeGameBoy as core::default::Default>::default(),
+            gameboy,
             tile_viewer: <TileViewer as core::default::Default>::default(),
             memory_viewer: <MemoryViewer as core::default::Default>::default(),
             is_playing: <bool as core::default::Default>::default(),
             frame_count: <u64 as core::default::Default>::default(),
-            redraw_requested: Some(redraw_requested),
+            redraw_requested: Arc::new(AtomicBool::new(false)),
             playback_controller,
             subscription_sender: None,
             keybinds,
+            rodio_handle,
+            frame_rate: 0.0,
+            prev_frame_time: Instant::now(),
         };
 
         {
             let gameboy = app.gameboy.clone();
+            let redraw_requested = app.redraw_requested.clone();
             thread::spawn(move || {
                 let mut is_playing = false;
                 loop {
@@ -283,18 +385,18 @@ impl App {
                     }
                     if is_playing {
                         {
-                            let mut gameboy = gameboy.0.lock().unwrap();
+                            let mut gameboy = gameboy.0.lock();
                             let redraw_request = gameboy.tick(false);
                             if redraw_request {
-                                let _ =
-                                    iced::futures::executor::block_on(redraw_requester.send(()));
+                                redraw_requested.store(true, core::sync::atomic::Ordering::Relaxed);
                             }
                         }
 
                         spin_sleep::SpinSleeper::default()
                             .with_spin_strategy(spin_sleep::SpinStrategy::SpinLoopHint)
-                            .sleep_ns(238);
+                            .sleep_ns(237);
                     }
+                    std::hint::spin_loop();
                 }
             });
         }
@@ -314,9 +416,11 @@ impl App {
                     row![
                         button("Start").on_press(GameBoyMessage::Play.into()),
                         button("Toggle Playback").on_press(GameBoyMessage::TogglePlayback.into()),
-                        button("Tick").on_press(GameBoyMessage::ManualTick.into())
+                        button("Tick").on_press(GameBoyMessage::ManualTick.into()),
+                        space().width(50),
+                        text!("{:.2} FPS", self.frame_rate)
                     ],
-                    canvas(self.gameboy.clone()).width(160 * 3).height(144 * 3)
+                    canvas(self.gameboy.clone()).width(Fill).height(Fill)
                 ]
                 .into(),
                 WindowType::TileViewer => self.tile_viewer.view().into(),
@@ -339,43 +443,38 @@ impl App {
         match message {
             Message::GameBoyMessage(message) => match message {
                 GameBoyMessage::ManualTick => {
-                    let mut gameboy: std::sync::MutexGuard<'_, GameBoy> =
-                        self.gameboy.0.lock().unwrap();
+                    let mut gameboy = self.gameboy.0.lock();
                     gameboy.tick(true);
-
-                    if gameboy.ppu.current_mode == Mode::VBlank
-                        && gameboy.context.memory.io.lcd.ly == 144
-                    {
-                        self.frame_count += 1;
-                        self.tile_viewer.tiles = gameboy
-                            .context
-                            .memory
-                            .vram
-                            .tile_data()
-                            .pipe(|data| data.as_chunks::<16>().0)
-                            .iter()
-                            .map(|x| {
-                                x.pipe(|data| data.as_chunks::<2>().0)
-                                    .iter()
-                                    .cloned()
-                                    .flat_map(|[left, right]| {
-                                        let row = ((left as u16) << 8) | right as u16;
-                                        (0..8)
-                                            .map(move |index| {
-                                                row.extract_bits(0b1000_0000_1000_0000 >> index)
-                                            })
-                                            .flat_map(|colour| match colour {
-                                                0 => [0xFF, 0xFF, 0xFF, 0xFF],
-                                                1 => [0xBC, 0xBC, 0xBC, 0xFF],
-                                                2 => [0x80, 0x80, 0x80, 0xFF],
-                                                _ => [0x0, 0x0, 0x0, 0xFF],
-                                            })
-                                    })
-                                    .collect()
-                            })
-                            .collect();
-                        self.tile_viewer.cache.clear();
-                    }
+                    self.frame_count += 1;
+                    self.tile_viewer.tiles = gameboy
+                        .context
+                        .memory
+                        .vram
+                        .tile_data()
+                        .pipe(|data| data.as_chunks::<16>().0)
+                        .iter()
+                        .map(|x| {
+                            x.pipe(|data| data.as_chunks::<2>().0)
+                                .iter()
+                                .cloned()
+                                .flat_map(|[left, right]| {
+                                    let row = ((left as u16) << 8) | right as u16;
+                                    (0..8)
+                                        .map(move |index| {
+                                            row.extract_bits(0b1000_0000_1000_0000 >> index)
+                                        })
+                                        .flat_map(|colour| match colour {
+                                            0 => [0xFF, 0xFF, 0xFF, 0xFF],
+                                            1 => [0xBC, 0xBC, 0xBC, 0xFF],
+                                            2 => [0x80, 0x80, 0x80, 0xFF],
+                                            _ => [0x0, 0x0, 0x0, 0xFF],
+                                        })
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    self.tile_viewer.cache.clear();
+                    return Task::done(Message::RedrawRequested);
                 }
                 GameBoyMessage::Play => {
                     let Some(rom_path) = rfd::FileDialog::new()
@@ -388,12 +487,8 @@ impl App {
                         return Task::none();
                     };
 
-                    let gameboy = &mut *self.gameboy.0.lock().unwrap();
+                    let gameboy = &mut *self.gameboy.0.lock();
                     gameboy.cpu.load_debug_initial_state(&mut gameboy.context);
-                    // state.gameboy.cpu.load_boot_rom(
-                    //     include_bytes!("../bootrom/dmg_boot.bin"),
-                    //     &mut state.gameboy.context,
-                    // );
 
                     let rom = fs::read(rom_path).unwrap();
                     gameboy.cpu.load_rom(&rom, &mut gameboy.context);
@@ -422,14 +517,14 @@ impl App {
                 return self.memory_viewer.update(message);
             }
             Message::SubscriberReady(mut sender) => {
-                if let Some(redraw_requested) = self.redraw_requested.take() {
-                    return Task::future(async move { sender.send(redraw_requested).await })
-                        .discard();
-                }
+                let redraw_requested = self.redraw_requested.clone();
+                return Task::future(async move { sender.send(redraw_requested).await }).discard();
             }
             Message::RedrawRequested => {
                 self.frame_count += 1;
-                let gameboy: std::sync::MutexGuard<'_, GameBoy> = self.gameboy.0.lock().unwrap();
+                self.frame_rate = 1.0 / self.prev_frame_time.elapsed().as_secs_f32();
+                self.prev_frame_time = Instant::now();
+                let gameboy = self.gameboy.0.lock();
 
                 self.tile_viewer.tiles = gameboy
                     .context
@@ -469,8 +564,7 @@ impl App {
                         0x1000 - range + 1,
                     );
 
-                    let gameboy: std::sync::MutexGuard<'_, GameBoy> =
-                        self.gameboy.0.lock().unwrap();
+                    let gameboy = self.gameboy.0.lock();
 
                     self.memory_viewer.current_view = ((mem_start * 16)
                         ..=min((mem_start + range) * 16, 0xFFFF))
@@ -486,20 +580,12 @@ impl App {
             Message::KeyboardEvent(event) => match event {
                 keyboard::Event::KeyPressed { physical_key, .. } => {
                     if let Some(&button) = self.keybinds.get(&physical_key) {
-                        self.gameboy
-                            .0
-                            .lock()
-                            .unwrap()
-                            .set_joypad_state(button, false);
+                        self.gameboy.0.lock().set_joypad_state(button, false);
                     }
                 }
                 keyboard::Event::KeyReleased { physical_key, .. } => {
                     if let Some(&button) = self.keybinds.get(&physical_key) {
-                        self.gameboy
-                            .0
-                            .lock()
-                            .unwrap()
-                            .set_joypad_state(button, true);
+                        self.gameboy.0.lock().set_joypad_state(button, true);
                     }
                 }
                 keyboard::Event::ModifiersChanged(modifiers) => {}
@@ -521,9 +607,9 @@ impl App {
 
                 output.send(Message::SubscriberReady(tx)).await.unwrap();
 
-                let mut redraw_requested = rx.recv().await.unwrap();
+                let redraw_requested = rx.recv().await.unwrap();
                 loop {
-                    if let Ok(()) = redraw_requested.recv().await {
+                    if redraw_requested.swap(false, core::sync::atomic::Ordering::Relaxed) {
                         output.send(Message::RedrawRequested).await.unwrap();
                     }
                 }
@@ -550,9 +636,7 @@ enum Message {
     GameBoyMessage(GameBoyMessage),
     WindowClosed(window::Id),
     MemoryViewerMessage(MemoryViewerMessage),
-    SubscriberReady(
-        iced::futures::channel::mpsc::Sender<iced::futures::channel::mpsc::Receiver<()>>,
-    ),
+    SubscriberReady(iced::futures::channel::mpsc::Sender<Arc<AtomicBool>>),
     RedrawRequested,
     UpdateMemoryViewer,
     KeyboardEvent(keyboard::Event),
@@ -633,6 +717,7 @@ struct GameBoy {
     context: Context<MemoryBus>,
     cpu: cpu::CPU<MemoryBus>,
     ppu: ppu::PPU,
+    apu: apu::APU,
     counter: u64,
 }
 impl GameBoy {
@@ -642,6 +727,7 @@ impl GameBoy {
             self.context.memory.tick_oam_dma();
         }
         self.ppu.tick(&mut self.context);
+        // self.apu.tick(&mut self.context);
 
         self.counter = self.counter.wrapping_add(1);
 
@@ -690,6 +776,7 @@ impl Default for GameBoy {
         let context = Context::default();
         let cpu = cpu::CPU::default();
         let ppu = ppu::PPU::default();
+        let apu = apu::APU::default();
 
         let mut buffer = BytesMut::zeroed(160 * 144 * 4);
         for pixel in buffer.as_chunks_mut::<4>().0 {
@@ -702,6 +789,7 @@ impl Default for GameBoy {
             context,
             cpu,
             ppu,
+            apu,
             counter: 0,
         }
     }
@@ -718,13 +806,40 @@ impl<Message> canvas::Program<Message> for ThreadSafeGameBoy {
         bounds: iced::Rectangle,
         _cursor: iced::advanced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let gameboy = self.0.lock().unwrap();
+        let gameboy = self.0.lock();
         let screen = gameboy.cache.draw(renderer, bounds.size(), |frame| {
             let image = Image::from(&Handle::from_rgba(160, 144, gameboy.buffer.clone()))
                 .snap(true)
                 .filter_method(image::FilterMethod::Nearest);
 
-            frame.draw_image(bounds.shrink(Padding::from([77, 80])), image);
+            let min_scale = {
+                let size = bounds.size();
+                let pos = bounds.position();
+                cmp::min(
+                    (size.height - pos.y) as u32 / 144,
+                    (size.width - pos.x) as u32 / 160,
+                )
+            };
+
+            let size = Point {
+                x: (160 * min_scale) as f32,
+                y: (144 * min_scale) as f32,
+            };
+
+            let center = Vector::from(bounds.size()) / 2.0
+                - Vector {
+                    x: (160 * min_scale / 2) as f32,
+                    y: (144 * min_scale / 2) as f32,
+                };
+
+            let bounds = Rectangle {
+                x: center.x,
+                y: center.y,
+                width: size.x,
+                height: size.y,
+            };
+
+            frame.draw_image(bounds, image);
         });
 
         vec![screen]

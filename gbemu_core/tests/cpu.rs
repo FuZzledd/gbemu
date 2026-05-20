@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use datatest_stable::Utf8Path;
-use gbemu::{
+use gbemu_core::{
     context::{Context, FlatMemory, Memory},
     cpu::CPU,
     opcode::Opcodes,
@@ -105,7 +105,7 @@ fn test_opcode(path: &Utf8Path, content: String) -> datatest_stable::Result<()> 
                 context.memory.write_u8(address, value);
             }
         }
-        cpu.state = gbemu::cpu::State::Decode(0);
+        cpu.state = gbemu_core::cpu::State::Decode(0);
         println!("{}", cpu.dump_state(&mut context));
         cpu.ir = context.memory.read_u8(cpu.pc);
         cpu.increment_pc(&mut context);

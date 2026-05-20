@@ -23,13 +23,17 @@ rustc-ice-*.txt
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-bootrom/*
+**/bootrom/*
 log.txt
 
 perf.data
 profile.json.gz
-flamegraph.svg
+**/flamegraph.svg
+**/tracing-flamechart.svg
+**/tracing-flamegraph.svg
+**/tracing.folded
 
 rom_16Mb.gb
 rom_32Mb.gb
 rom_64Mb.gb
+

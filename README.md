@@ -20,6 +20,6 @@ Just run `cargo build`
 ## Current state:
 - Implemented CPU, passes Blargg's cpu-instr tests, and all SSTs (with the exception of the STOP instruction, which is unimplemented currently)
 - PPU implementation, passes dmg_acid2
-- No sound
-- No serial
+- Partially working sound
+- Basic serial for test output
 - No mappers

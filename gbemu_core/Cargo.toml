@@ -1,0 +1,29 @@
+[package]
+name = "gbemu_core"
+version = "0.1.0"
+edition = "2024"
+
+[[test]]
+harness = false
+name = "cpu"
+
+[dependencies]
+array-deque = "0.4.0"
+better_default = "1.0.5"
+bitvec = "1.0.1"
+blip_buf = "0.1.6"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+crossbeam = "0.8.4"
+dasp = "0.11.0"
+itertools = "0.14.0"
+log = "0.4.32"
+parking_lot = "0.12.5"
+paste = "1.0.15"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+strum = { version = "0.28.0", features = ["derive"] }
+tap = "1.0.1"
+tracing = "0.1.44"
+
+[dev-dependencies]
+datatest-stable = "0.3.3"

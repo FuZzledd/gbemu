@@ -1,3 +1,4 @@
 [tools]
 rust = "nightly"
 "cargo:bacon-ls" = "latest"
+"cargo:wild-linker" = "latest"
