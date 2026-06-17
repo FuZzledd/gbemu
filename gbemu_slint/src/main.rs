@@ -475,8 +475,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             gameboy.cpu.load_rom(&rom, &mut gameboy.context);
 
             ui.upgrade_in_event_loop(using!([playback_controller, recent], move |mut handle| {
-                handle.set_paused(false);
-                playback_controller.send(true).unwrap();
+                // handle.set_paused(false);
+                // playback_controller.send(true).unwrap();
                 set_recent(&mut handle, &recent.read());
                 handle.invoke_focus();
             }))
@@ -521,8 +521,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             gameboy.cpu.load_rom(&rom, &mut gameboy.context);
 
             ui.upgrade_in_event_loop(using!([playback_controller, recent], move |mut handle| {
-                handle.set_paused(false);
-                playback_controller.send(true).unwrap();
+                // handle.set_paused(false);
+                // playback_controller.send(true).unwrap();
                 set_recent(&mut handle, &recent.read());
                 handle.invoke_focus();
             }))

@@ -1,10 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["gbemu_core", "gbemu_iced", "gbemu_slint", "gbemu_slint/slint"]
+default-members = ["gbemu_slint"]
 
 [profile.dev]
 opt-level = 3
-lto = "thin"
 
 [profile.dev.package."*"]
 opt-level = 3

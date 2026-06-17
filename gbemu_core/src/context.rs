@@ -8,6 +8,8 @@ use better_default::Default;
 use bitvec::{access::BitSafe, prelude::*};
 use bytemuck::TransparentWrapper;
 use serde::de::value;
+use spire_enum::prelude::{delegate_impl, delegated_enum};
+use strum::FromRepr;
 use tracing::debug;
 
 use crate::{
@@ -110,13 +112,9 @@ impl Serial {
                     .io
                     .interrupt
                     .schedule_interrupt(InterruptType::Serial);
-                println!("scheduling serial interrupt");
                 serial.serial_control.set_transfer_enable(false);
-                // print!(
-                //     "{}",
-                //     char::from_u32(serial.output_byte as u32).unwrap()
-                // );
-                // let _ = io::stdout().flush();
+                print!("{}", char::from_u32(serial.output_byte as u32).unwrap());
+                let _ = io::stdout().flush();
             }
 
             serial.output_byte <<= 1;
@@ -364,15 +362,175 @@ impl IoRegisters {
     }
 }
 
+#[delegated_enum(impl_conversions)]
 #[derive(Default)]
-pub struct MemoryBus {
+pub enum MemoryBankController {
+    #[default]
+    MBC0(Mbc0),
+    MBC1(Mbc1),
+}
+
+#[delegate_impl]
+impl MemoryBankController {
+    pub fn read_u8(&self, address: u16) -> u8;
+    pub fn write_u8(&mut self, address: u16, value: u8);
+}
+
+#[derive(Default)]
+pub struct Mbc0 {
     #[default([0; 1024*16])]
     pub(crate) rom: Memory16K,
-    #[default(vec![[0; 1024*16]])]
-    pub(crate) rom_banks: Vec<Memory16K>,
-    pub vram: Vram,
+    #[default([0; 1024*16])]
+    pub(crate) rom2: Memory16K,
     #[default([0; 1024 * 8])]
     pub(crate) external_ram: Memory8K,
+}
+
+impl Mbc0 {
+    pub fn read_u8(&self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x3FFF => self.rom[address as usize],
+            0x4000..=0x7FFF => self.rom2[address as usize - 0x4000],
+            0xA000..=0xBFFF => self.external_ram[address as usize - 0xA000],
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn write_u8(&mut self, address: u16, value: u8) {
+        match address {
+            0x0000..=0x3FFF => {
+                println!(
+                    "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
+                )
+            } //self.rom[address as usize] = value,
+            0x4000..=0x7FFF => {
+                // TODO: switchable rom banks
+                //self.rom_banks[0][address as usize - 0x4000] = value
+                println!(
+                    "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
+                )
+            }
+            0xA000..=0xBFFF => self.external_ram[address as usize - 0xA000] = value,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn new(rom: &[u8]) -> Self {
+        let mut ret = Self::default();
+        ret.rom.copy_from_slice(&rom[..1024 * 16]);
+        ret.rom2.copy_from_slice(&rom[1024 * 16..]);
+
+        ret
+    }
+}
+
+#[derive(Default, FromRepr)]
+pub enum BankingMode {
+    #[default]
+    Simple = 0,
+    Advanced = 1,
+}
+
+#[derive(Default)]
+pub struct Mbc1 {
+    #[default(vec![[0; 1024*16]])]
+    pub(crate) rom_banks: Vec<Memory16K>,
+    #[default(vec![[0; 1024 * 8]])]
+    pub(crate) ram_banks: Vec<Memory8K>,
+
+    pub ram_enable: bool,
+    pub rom_bank: usize,
+    pub ram_bank: usize,
+    pub banking_mode: BankingMode,
+}
+
+impl Mbc1 {
+    pub fn read_u8(&self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x3FFF => match self.banking_mode {
+                BankingMode::Simple => self.rom_banks[0][address as usize],
+                BankingMode::Advanced => {
+                    let bank = (self.ram_bank << 5) % self.rom_banks.len();
+                    self.rom_banks[bank][address as usize]
+                }
+            },
+            0x4000..=0x7FFF => {
+                let bank = ((self.ram_bank << 5) + self.rom_bank.min(1)) % self.rom_banks.len();
+                self.rom_banks[bank][address as usize - 0x4000]
+            }
+            0xA000..=0xBFFF => {
+                if self.ram_enable && !self.ram_banks.is_empty() {
+                    match self.banking_mode {
+                        BankingMode::Simple => self.ram_banks[0][address as usize - 0xA000],
+                        BankingMode::Advanced => {
+                            self.ram_banks[self.ram_bank % self.ram_banks.len()]
+                                [address as usize - 0xA000]
+                        }
+                    }
+                } else {
+                    0xFF
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+    pub fn write_u8(&mut self, address: u16, value: u8) {
+        match address {
+            0x0000..=0x1FFF => self.ram_enable = value & 0b1111 == 0xA,
+            0x2000..=0x3FFF => self.rom_bank = value as usize & 0b11111,
+            0x4000..=0x5FFF => self.ram_bank = value as usize & 0b11,
+            0x6000..=0x7FFF => {
+                self.banking_mode = BankingMode::from_repr(value as usize & 0b1).unwrap()
+            }
+            0xA000..=0xBFFF => {
+                if self.ram_enable && !self.ram_banks.is_empty() {
+                    match self.banking_mode {
+                        BankingMode::Simple => self.ram_banks[0][address as usize - 0xA000] = value,
+                        BankingMode::Advanced => {
+                            let bank = self.ram_bank % self.ram_banks.len();
+                            self.ram_banks[bank][address as usize - 0xA000] = value
+                        }
+                    }
+                }
+            }
+            _ => unreachable!("Wrote to address 0x{address:04X}"),
+        }
+    }
+
+    pub fn new(rom: &[u8]) -> Self {
+        let rom_banks = match rom[0x148] {
+            0x00 => 2,
+            0x01 => 4,
+            0x02 => 8,
+            0x03 => 16,
+            0x04 => 32,
+            0x05 => 64,
+            0x06 => 128,
+            0x07 => 256,
+            0x08 => 512,
+            _ => unimplemented!(),
+        };
+
+        let ram_banks = match rom[0x149] {
+            0x00 => 0,
+            0x01 => unimplemented!(),
+            0x02 => 1,
+            0x03 => 4,
+            _ => unimplemented!(),
+        };
+
+        Self {
+            rom_banks: Vec::from(rom[0..rom_banks * 1024 * 16].as_chunks().0),
+            ram_banks: vec![[0; 1024 * 8]; ram_banks],
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct MemoryBus {
+    pub mapper: MemoryBankController,
+    pub vram: Vram,
     #[default([0; 1024 * 4])]
     pub(crate) wram1: Memory4K,
     #[default([0; 1024 * 4])]
@@ -387,13 +545,8 @@ pub struct MemoryBus {
 impl MemoryBus {
     pub fn read_u8(&self, address: u16) -> u8 {
         match address {
-            0x0000..=0x3FFF => self.rom[address as usize],
-            0x4000..=0x7FFF => {
-                // TODO: switchable rom banks
-                self.rom_banks[0][address as usize - 0x4000]
-            }
+            0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.read_u8(address),
             0x8000..=0x9FFF => self.vram[address as usize - 0x8000],
-            0xA000..=0xBFFF => self.external_ram[address as usize - 0xA000],
             0xC000..=0xCFFF => self.wram1[address as usize - 0xC000],
             0xD000..=0xDFFF => self.wram2[address as usize - 0xD000],
             0xE000..=0xEFFF => {
@@ -416,20 +569,8 @@ impl MemoryBus {
 
     pub fn write_u8(&mut self, address: u16, value: u8) {
         match address {
-            0x0000..=0x3FFF => {
-                println!(
-                    "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
-                )
-            } //self.rom[address as usize] = value,
-            0x4000..=0x7FFF => {
-                // TODO: switchable rom banks
-                //self.rom_banks[0][address as usize - 0x4000] = value
-                println!(
-                    "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
-                )
-            }
+            0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.write_u8(address, value),
             0x8000..=0x9FFF => self.vram[address as usize - 0x8000] = value,
-            0xA000..=0xBFFF => self.external_ram[address as usize - 0xA000] = value,
             0xC000..=0xCFFF => self.wram1[address as usize - 0xC000] = value,
             0xD000..=0xDFFF => self.wram2[address as usize - 0xD000] = value,
             0xE000..=0xEFFF => {
@@ -500,12 +641,15 @@ impl Memory for MemoryBus {
     }
 
     fn load_boot_rom(&mut self, rom: &[u8]) {
-        self.rom[..rom.len()].copy_from_slice(rom);
+        // self.rom[..rom.len()].copy_from_slice(rom);
     }
 
     fn load_rom(&mut self, rom: &[u8]) {
-        self.rom.copy_from_slice(&rom[..1024 * 16]);
-        self.rom_banks[0].copy_from_slice(&rom[1024 * 16..]);
+        self.mapper = match rom[0x147] {
+            0x00 => Mbc0::new(rom).into(),
+            0x01..=0x03 => Mbc1::new(rom).into(),
+            _ => unimplemented!(),
+        }
     }
 
     fn tick_oam_dma(&mut self) {
