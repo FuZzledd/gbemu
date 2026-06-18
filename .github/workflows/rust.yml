@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - uses: rui314/setup-mold@v1
     - uses: actions-use/setup-rust@stable
       with:
         # Rust toolchain specification -- see https://rust-lang.github.io/rustup/concepts/toolchains.html#toolchain-specification
