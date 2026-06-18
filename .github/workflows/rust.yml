@@ -34,4 +34,6 @@ jobs:
       uses: janisz/action@v2
       with:
         paths: "target/nextest/ci/junit.xml"
+        show: "all"
+        folded: true
         
