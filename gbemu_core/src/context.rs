@@ -455,7 +455,7 @@ impl Mbc1 {
                 }
             },
             0x4000..=0x7FFF => {
-                let bank = ((self.ram_bank << 5) + self.rom_bank.min(1)) % self.rom_banks.len();
+                let bank = ((self.ram_bank << 5) + self.rom_bank.max(1)) % self.rom_banks.len();
                 self.rom_banks[bank][address as usize - 0x4000]
             }
             0xA000..=0xBFFF => {
