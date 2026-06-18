@@ -1,6 +1,7 @@
 [profile.ci]
 # Run all tests regardless of failures.
 fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 2 }
 
 [profile.ci.junit]
 path = "junit.xml"
