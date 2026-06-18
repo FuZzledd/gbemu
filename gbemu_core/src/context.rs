@@ -7,6 +7,7 @@ use std::{
 use better_default::Default;
 use bitvec::{access::BitSafe, prelude::*};
 use bytemuck::TransparentWrapper;
+use ringbuf::{StaticRb, traits::RingBuffer};
 use serde::de::value;
 use spire_enum::prelude::{delegate_impl, delegated_enum};
 use strum::FromRepr;
@@ -74,6 +75,7 @@ impl JoypadRegister {
 
 #[derive(Default)]
 pub struct Serial {
+    pub output: StaticRb<u8, 1024>,
     serial_data: u8,
     serial_control: SerialControlRegister,
     transfer_status: u8,
@@ -113,8 +115,8 @@ impl Serial {
                     .interrupt
                     .schedule_interrupt(InterruptType::Serial);
                 serial.serial_control.set_transfer_enable(false);
-                print!("{}", char::from_u32(serial.output_byte as u32).unwrap());
-                let _ = io::stdout().flush();
+
+                serial.output.push_overwrite(serial.output_byte);
             }
 
             serial.output_byte <<= 1;

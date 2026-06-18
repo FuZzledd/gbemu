@@ -1,6 +1,20 @@
 #![feature(uint_gather_scatter_bits)]
+#![feature(hash_map_macro)]
 
 use core::ops::{BitAnd, BitOr, Not, Shl, Shr};
+use std::collections::HashMap;
+
+use bytes::BytesMut;
+use rgb::Rgba;
+use tap::Conv;
+use tracing::instrument;
+
+use crate::{
+    context::{Context, Memory, MemoryBus, Serial},
+    ppu::{Mode, Pixel},
+};
+
+use std::hash_map;
 
 pub mod apu;
 pub mod context;
@@ -41,4 +55,108 @@ where
     T: PartialEq,
 {
     (num >> index) & T::from(true) == T::from(true)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum GameBoyButton {
+    Select,
+    Start,
+    A,
+    B,
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+pub struct GameBoy {
+    pub buffer: BytesMut,
+    pub context: Context<MemoryBus>,
+    pub cpu: cpu::CPU<MemoryBus>,
+    pub ppu: ppu::PPU,
+    pub apu: apu::APU,
+    pub counter: u64,
+    pub palette: HashMap<Pixel, Rgba<u8>>,
+}
+impl GameBoy {
+    #[instrument(skip_all)]
+    pub fn tick(&mut self, manual: bool) -> bool {
+        if self.counter.is_multiple_of(4) {
+            self.cpu.tick(&mut self.context);
+            self.context.memory.tick_oam_dma();
+        }
+
+        if self.counter.is_multiple_of(128) {
+            Serial::tick(&mut self.context);
+        }
+
+        self.ppu.tick(&mut self.context);
+
+        self.apu.tick(&mut self.context);
+
+        self.counter = self.counter.wrapping_add(1);
+
+        if (self.ppu.current_mode == Mode::VBlank
+            && self.context.memory.io.lcd.ly == 144
+            && self.ppu.cycle_counter == 0)
+            || manual
+        {
+            self.buffer = self
+                .ppu
+                .screen
+                .iter()
+                .flat_map(|pixel| self.palette[pixel].conv::<[u8; 4]>())
+                .collect();
+
+            return true;
+        }
+        false
+    }
+
+    pub fn set_joypad_state(&mut self, button: GameBoyButton, state: bool) {
+        let button_state = &mut self.context.memory.io.joypad.buttons_state;
+        let dpad_state = &mut self.context.memory.io.joypad.dpad_state;
+
+        match button {
+            GameBoyButton::Select => button_state.set(2, state),
+            GameBoyButton::Start => button_state.set(3, state),
+            GameBoyButton::A => button_state.set(0, state),
+            GameBoyButton::B => button_state.set(1, state),
+            GameBoyButton::Left => dpad_state.set(1, state),
+            GameBoyButton::Right => dpad_state.set(0, state),
+            GameBoyButton::Up => dpad_state.set(2, state),
+            GameBoyButton::Down => dpad_state.set(3, state),
+        }
+    }
+}
+
+impl Default for GameBoy {
+    fn default() -> Self {
+        let context = Context::default();
+        let cpu = cpu::CPU::default();
+        let ppu = ppu::PPU::default();
+        let apu = apu::APU::default();
+
+        let mut buffer = BytesMut::zeroed(160 * 144 * 4);
+        for pixel in buffer.as_chunks_mut::<4>().0 {
+            pixel[3] = 0xFF
+        }
+
+        let palette = hash_map! {
+            ppu::Pixel::White => [220, 220, 220, 255].into(),
+            ppu::Pixel::LightGray => [160, 160, 160, 255].into(),
+            ppu::Pixel::DarkGrey => [80, 80, 80, 255].into(),
+            ppu::Pixel::Black => [0, 0, 0, 255].into(),
+        };
+
+        Self {
+            buffer,
+            context,
+            cpu,
+            ppu,
+            apu,
+            counter: 0,
+            palette,
+        }
+    }
 }

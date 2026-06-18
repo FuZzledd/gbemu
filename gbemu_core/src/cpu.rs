@@ -547,6 +547,11 @@ impl<T: Memory + Default> CPU<T> {
                     _ => unreachable!(),
                 };
 
+                if matches!((destination, source), (R8(B), R8(B))) {
+                    println!("Breakpoint hit");
+                    println!("{}", self.dump_state(ctx));
+                }
+
                 self.state = State::Execute(Operation::Load(destination, source), 0);
             }
             (0o2, op, target) => {

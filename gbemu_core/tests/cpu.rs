@@ -1,5 +1,3 @@
-use std::{fs, path::Path};
-
 use datatest_stable::Utf8Path;
 use gbemu_core::{
     context::{Context, FlatMemory, Memory},
@@ -58,7 +56,7 @@ pub struct State {
     ram: Vec<(u16, u8)>,
 }
 
-fn test_opcode(path: &Utf8Path, content: String) -> datatest_stable::Result<()> {
+fn test_opcode(_path: &Utf8Path, content: String) -> datatest_stable::Result<()> {
     let opcodes = Opcodes::default();
 
     let test_data: OpcodeTests = serde_json::from_str(&content)?;
@@ -85,8 +83,8 @@ fn test_opcode(path: &Utf8Path, content: String) -> datatest_stable::Result<()> 
                 f,
                 h,
                 l,
-                ime,
-                ei,
+                ime: _ime,
+                ei: _ei,
                 ram,
             } = initial_state;
             cpu.pc = pc;
@@ -110,7 +108,7 @@ fn test_opcode(path: &Utf8Path, content: String) -> datatest_stable::Result<()> 
         cpu.ir = context.memory.read_u8(cpu.pc);
         cpu.increment_pc(&mut context);
         let mut cb = false;
-        for cycle in cycles {
+        for _cycle in cycles {
             println!(
                 "Current instruction: PC: 0x{:04X} - 0x{:02X} ({})",
                 cpu.pc.wrapping_sub(1),
@@ -142,8 +140,8 @@ fn test_opcode(path: &Utf8Path, content: String) -> datatest_stable::Result<()> 
                 f,
                 h,
                 l,
-                ime,
-                ei,
+                ime: _,
+                ei: _,
                 ram,
             } = final_state;
             if !cpu.halted {

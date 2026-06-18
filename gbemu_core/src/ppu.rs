@@ -423,7 +423,7 @@ struct SpritePixel {
     priority: bool,
 }
 
-#[derive(Debug, Clone, Copy, FromRepr, Default)]
+#[derive(Debug, Clone, Copy, FromRepr, Default, Hash, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Pixel {
     #[default]

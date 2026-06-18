@@ -4,7 +4,7 @@ members = ["gbemu_core", "gbemu_iced", "gbemu_slint", "gbemu_slint/slint"]
 default-members = ["gbemu_slint"]
 
 [profile.dev]
-opt-level = 3
+opt-level = 2
 
 [profile.dev.package."*"]
 opt-level = 3
