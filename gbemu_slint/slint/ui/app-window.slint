@@ -1,0 +1,208 @@
+import { Button, VerticalBox } from "std-widgets.slint";
+
+export {TileViewer} from "tile-viewer.slint";
+
+enum KeyEventType {
+    press, release
+}
+
+struct KeyboardEvent {
+    type: KeyEventType,
+    event: KeyEvent,
+}
+
+struct RecentRom { index: int, path: string}
+
+export component AppWindow inherits Window {
+    callback load_rom();
+    callback load_recent(int);
+    callback toggle_playback();
+    callback step_tick();
+
+    callback toggle_tile_viewer();
+    callback toggle_memory_viewer();
+
+    callback key_event(KeyboardEvent);
+
+    in-out property <bool> tile_viewer_shown: false;
+    in-out property <bool> memory_viewer_shown: false;
+
+    in-out property <bool> paused: true;
+    in-out property <int> scale_factor: 2;
+    in-out property <bool> show_fps: false;
+
+    in property <[RecentRom]> recent;
+
+    in property <float> fps: 0;
+    in-out property <image> screen: @image-url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACQCAYAAACPtWCAAAAACXBIWXMAAA7EAAAOxAGVKw4bAAABhUlEQVR4nO3UMREAIAADsYJ/zyDjl8RAl7+ebW8QudUwCJCcByQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICZKUPfgECH79JdFcAAAAASUVORK5CYII=");
+
+    function restore_focus() {
+        key-handler.focus();
+    }
+
+    forward-focus: key-handler;
+
+    key-handler := FocusScope {
+        key-pressed(event) => {
+            if !event.repeat {
+                key_event({ event: event, type: KeyEventType.press });
+            }
+            accept
+        }
+        key-released(event) => {
+            if !event.repeat {
+                key_event( { event: event, type: KeyEventType.release });
+            }
+            accept
+        }
+    }
+
+    MenuBar {
+        Menu {
+            title: @tr("File");
+            MenuItem {
+                title: @tr("Load ROM");
+                activated => {
+                    load_rom()
+                }
+                shortcut: @keys(Control + O);
+            }
+
+            Menu {
+                title: @tr("Recent");
+                for recent-rom-entry in recent: MenuItem {
+                    title: recent-rom-entry.index + 1 + ": " + recent-rom-entry.path;
+                    activated => {
+                        load_recent(recent-rom-entry.index)
+                    }
+                }
+                for i in 5 - recent.length: MenuItem {
+                    enabled: false;
+                    title: "None";
+                }
+            }
+        }
+
+        Menu {
+            title: @tr("Playback");
+            MenuItem {
+                title: @tr("Paused");
+                checkable: true;
+                checked <=> paused;
+                activated => {
+                    toggle_playback()
+                }
+                shortcut: @keys(Control + P);
+            }
+
+            MenuItem {
+                title: @tr("Step Tick");
+                activated => {
+                    step_tick()
+                }
+                shortcut: @keys(Control + T);
+            }
+        }
+
+        Menu {
+            title: @tr("Video");
+            MenuItem {
+                title: @tr("Show FPS");
+                checkable: true;
+                checked <=> show_fps;
+                activated => {
+                }
+            }
+
+            Menu {
+                title: @tr("Video Scale");
+                MenuItem {
+                    title: @tr("1x");
+                    checkable: true;
+                    checked: scale_factor == 1;
+                    activated => {
+                        scale_factor = 1;
+                    }
+                }
+
+                MenuItem {
+                    title: @tr("2x");
+                    checkable: true;
+                    checked: scale_factor == 2;
+                    activated => {
+                        scale_factor = 2;
+                    }
+                }
+
+                MenuItem {
+                    title: @tr("3x");
+                    checkable: true;
+                    checked: scale_factor == 3;
+                    activated => {
+                        scale_factor = 3;
+                    }
+                }
+
+                MenuItem {
+                    title: @tr("4x");
+                    checkable: true;
+                    checked: scale_factor == 4;
+                    activated => {
+                        scale_factor = 4;
+                    }
+                }
+            }
+        }
+
+        Menu {
+            title: @tr("Tools");
+            MenuItem {
+                title: @tr("Tile Viewer");
+                checkable: true;
+                checked <=> tile_viewer_shown;
+                activated => {
+                    toggle_tile_viewer()
+                }
+            }
+
+            MenuItem {
+                title: @tr("Memory Viewer");
+                checkable: true;
+                checked <=> memory_viewer_shown;
+                activated => {
+                    toggle_memory_viewer()
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        min-height: screen_elem.height;
+        min-width: screen_elem.width;
+        forward-focus: key-handler;
+
+        Rectangle {
+            width: 160px * scale_factor;
+            height: 144px * scale_factor;
+            Text {
+                horizontal-alignment: right;
+                stroke: black;
+                stroke-width: 2px;
+                visible: show_fps;
+                x: 0;
+                y: 0;
+                width: 100%;
+                text: fps.to-fixed(1);
+                z: 20;
+            }
+
+            screen_elem := Image {
+                width: 160px * scale_factor;
+                height: 144px * scale_factor;
+                image-fit: ImageFit.contain;
+                image-rendering: pixelated;
+                source <=> screen;
+            }
+        }
+    }
+}

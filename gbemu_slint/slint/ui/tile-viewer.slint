@@ -1,0 +1,22 @@
+import { AboutSlint, VerticalBox, GridBox } from "std-widgets.slint";
+
+export struct Tile {
+    index: int,
+    buffer: image,
+}
+
+export component TileViewer inherits Window {
+    title: @tr("Tile Viewer");
+    in-out property <[Tile]> tiles;
+    GridBox {
+        spacing: 0px;
+        for tile in tiles: Image {
+            row: tile.index / 16;
+            col: mod(tile.index, 16);
+            width: 16px;
+            height: 16px;
+            source: tile.buffer;
+            image-rendering: pixelated;
+        }
+    }
+}
