@@ -1,0 +1,35 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch: 
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions-use/setup-rust@stable
+      with:
+        # Rust toolchain specification -- see https://rust-lang.github.io/rustup/concepts/toolchains.html#toolchain-specification
+        toolchain: "nightly"
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: nextest
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build -p gbemu_core --verbose
+    - name: Run tests
+      run: cargo nextest run -p gbemu_core --verbose --profile ci
+    - name: Display test summary
+      uses: janisz/action@v2
+      with:
+        paths: "target/nextest/ci/junit.xml"
+        
