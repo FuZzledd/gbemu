@@ -31,7 +31,7 @@ jobs:
       run: cargo nextest run -p gbemu_core --verbose --profile ci
       continue-on-error: true
     - name: Display test summary
-      uses: janisz/action@v2
+      uses: test-summary/action@v2
       with:
         paths: "target/nextest/ci/junit.xml"
         show: "all"
