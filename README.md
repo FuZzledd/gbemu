@@ -1,6 +1,6 @@
 # gbemu (better name TBD)
 
-This is a very WIP Game Boy emulator, with an Iced frontend
+This is a very WIP Game Boy emulator, with an Slint frontend
 
 # Building
 Requires Rust Nightly.
@@ -19,7 +19,7 @@ Just run `cargo build`
 
 ## Current state:
 - Implemented CPU, passes Blargg's cpu-instr tests, and all SSTs (with the exception of the STOP instruction, which is unimplemented currently)
-- PPU implementation, passes dmg_acid2
+- PPU implementation, passes dmg_acid2, displays Prehistorik Man
 - Partially working sound
 - Basic serial for test output
-- No mappers
+- MBC0 (No mapper) and MBC1 are currently implemented
