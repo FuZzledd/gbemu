@@ -10,7 +10,7 @@ use tap::Conv;
 use tracing::instrument;
 
 use crate::{
-    context::{Context, Memory, MemoryBus, Serial},
+    context::{Context, InterruptRegister, InterruptType::Joypad, Memory, MemoryBus, Serial},
     ppu::{Mode, Pixel},
 };
 
@@ -117,6 +117,9 @@ impl GameBoy {
         let button_state = &mut self.context.memory.io.joypad.buttons_state;
         let dpad_state = &mut self.context.memory.io.joypad.dpad_state;
 
+        let prev_button_state = button_state.clone();
+        let prev_dpad_state = dpad_state.clone();
+
         match button {
             GameBoyButton::Select => button_state.set(2, state),
             GameBoyButton::Start => button_state.set(3, state),
@@ -126,6 +129,12 @@ impl GameBoy {
             GameBoyButton::Right => dpad_state.set(0, state),
             GameBoyButton::Up => dpad_state.set(2, state),
             GameBoyButton::Down => dpad_state.set(3, state),
+        }
+
+        if (prev_button_state & !button_state.clone() | (prev_dpad_state & !dpad_state.clone()))
+            .any()
+        {
+            self.context.memory.io.interrupt.schedule_interrupt(Joypad);
         }
     }
 }

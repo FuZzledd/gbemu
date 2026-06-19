@@ -1,7 +1,8 @@
-use core::ops::BitAnd;
+use core::{cell::Cell, ops::BitAnd};
 use std::{
     io::{self, Write},
     process::Output,
+    time::Instant,
 };
 
 use better_default::Default;
@@ -11,7 +12,7 @@ use ringbuf::{StaticRb, traits::RingBuffer};
 use serde::de::value;
 use spire_enum::prelude::{delegate_impl, delegated_enum};
 use strum::FromRepr;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{
     apu::{AudioRegister, AudioRegisters},
@@ -310,11 +311,25 @@ impl InterruptRegister for InterruptFlag {
 
 #[allow(unused)]
 fn unimplemented_io_read(address: u8) -> u8 {
+    info!("Unimplemented read to IO register 0xFF{address:02X}");
     0xFF
 }
 
 #[allow(unused)]
-fn unimplemented_io_write(address: u8, value: u8) {}
+fn unimplemented_io_write(address: u8, value: u8) {
+    info!("Unimplemented write to IO register 0xFF{address:02X} with value 0x{value:02X}");
+}
+
+#[allow(unused)]
+fn unimplemented_mem_read(address: u16) -> u8 {
+    info!("Unimplemented read to address 0x{address:04X}");
+    0xFF
+}
+
+#[allow(unused)]
+fn unimplemented_mem_write(address: u16, value: u8) {
+    info!("Unimplemented write to to address 0x{address:04X} with value 0x{value:02X}");
+}
 
 impl IoRegisters {
     pub(crate) fn read_u8(&self, address: u8) -> u8 {
@@ -370,12 +385,21 @@ pub enum MemoryBankController {
     #[default]
     MBC0(Mbc0),
     MBC1(Mbc1),
+    MBC3(Mbc3),
 }
 
 #[delegate_impl]
 impl MemoryBankController {
     pub fn read_u8(&self, address: u16) -> u8;
     pub fn write_u8(&mut self, address: u16, value: u8);
+}
+
+trait Mapper {
+    fn read_u8(&self, address: u16) -> u8;
+
+    fn write_u8(&mut self, address: u16, value: u8);
+
+    fn new(rom: &[u8]) -> Self;
 }
 
 #[derive(Default)]
@@ -388,8 +412,8 @@ pub struct Mbc0 {
     pub(crate) external_ram: Memory8K,
 }
 
-impl Mbc0 {
-    pub fn read_u8(&self, address: u16) -> u8 {
+impl Mapper for Mbc0 {
+    fn read_u8(&self, address: u16) -> u8 {
         match address {
             0x0000..=0x3FFF => self.rom[address as usize],
             0x4000..=0x7FFF => self.rom2[address as usize - 0x4000],
@@ -398,7 +422,7 @@ impl Mbc0 {
         }
     }
 
-    pub fn write_u8(&mut self, address: u16, value: u8) {
+    fn write_u8(&mut self, address: u16, value: u8) {
         match address {
             0x0000..=0x3FFF => {
                 println!(
@@ -417,7 +441,7 @@ impl Mbc0 {
         }
     }
 
-    pub fn new(rom: &[u8]) -> Self {
+    fn new(rom: &[u8]) -> Self {
         let mut ret = Self::default();
         ret.rom.copy_from_slice(&rom[..1024 * 16]);
         ret.rom2.copy_from_slice(&rom[1024 * 16..]);
@@ -446,8 +470,8 @@ pub struct Mbc1 {
     pub banking_mode: BankingMode,
 }
 
-impl Mbc1 {
-    pub fn read_u8(&self, address: u16) -> u8 {
+impl Mapper for Mbc1 {
+    fn read_u8(&self, address: u16) -> u8 {
         match address {
             0x0000..=0x3FFF => match self.banking_mode {
                 BankingMode::Simple => self.rom_banks[0][address as usize],
@@ -476,7 +500,7 @@ impl Mbc1 {
             _ => unreachable!(),
         }
     }
-    pub fn write_u8(&mut self, address: u16, value: u8) {
+    fn write_u8(&mut self, address: u16, value: u8) {
         match address {
             0x0000..=0x1FFF => self.ram_enable = value & 0b1111 == 0xA,
             0x2000..=0x3FFF => self.rom_bank = value as usize & 0b11111,
@@ -499,7 +523,7 @@ impl Mbc1 {
         }
     }
 
-    pub fn new(rom: &[u8]) -> Self {
+    fn new(rom: &[u8]) -> Self {
         let rom_banks = match rom[0x148] {
             0x00 => 2,
             0x01 => 4,
@@ -526,6 +550,216 @@ impl Mbc1 {
             ram_banks: vec![[0; 1024 * 8]; ram_banks],
             ..Default::default()
         }
+    }
+}
+
+#[derive(Default)]
+pub struct Mbc3 {
+    #[default(vec![[0; 1024*16]])]
+    pub(crate) rom_banks: Vec<Memory16K>,
+    #[default(vec![[0; 1024 * 8]])]
+    pub(crate) ram_banks: Vec<Memory8K>,
+
+    pub ram_enable: bool,
+    pub rom_bank: usize,
+    pub ram_bank_and_rtc_register: usize,
+    pub rtc_latched: bool,
+    pub latch_progress: bool,
+
+    pub seconds_set: Cell<u64>,
+    pub minutes_set: Cell<u64>,
+    pub hours_set: Cell<u64>,
+    pub days_set: Cell<u64>,
+
+    pub seconds_latched: u64,
+    pub minutes_latched: u64,
+    pub hours_latched: u64,
+    pub days_latched: u64,
+
+    #[default(Instant::now().into())]
+    pub time_last_accessed: Cell<Instant>,
+
+    pub day_overflow: Cell<bool>,
+    pub day_overflow_latched: bool,
+    pub timer_halt: bool,
+}
+
+impl Mapper for Mbc3 {
+    fn read_u8(&self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x3FFF => self.rom_banks[0][address as usize],
+            0x4000..=0x7FFF => {
+                let bank = self.rom_bank.max(1) % self.rom_banks.len();
+                self.rom_banks[bank][address as usize - 0x4000]
+            }
+            0xA000..=0xBFFF => {
+                if self.ram_enable {
+                    match self.ram_bank_and_rtc_register {
+                        0x00..=0x07 => {
+                            if self.ram_bank_and_rtc_register < self.ram_banks.len() {
+                                self.ram_banks
+                                    [self.ram_bank_and_rtc_register % self.ram_banks.len()]
+                                    [address as usize - 0xA000]
+                            } else {
+                                0xFF
+                            }
+                        }
+                        register @ 0x08..=0x0C => {
+                            self.update_time();
+                            (if self.rtc_latched {
+                                match register {
+                                    ..0x08 | 0x0D.. => unreachable!(),
+                                    0x08 => self.seconds_latched,
+                                    0x09 => self.minutes_latched,
+                                    0x0A => self.hours_latched,
+                                    0x0B => self.days_latched & 0b1111_1111,
+                                    0x0C => {
+                                        self.days_latched & (1 << 8)
+                                            | ((self.timer_halt as u64) << 6)
+                                            | ((self.day_overflow_latched as u64) << 7)
+                                    }
+                                }
+                            } else {
+                                match register {
+                                    ..0x08 | 0x0D.. => unreachable!(),
+                                    0x08 => self.seconds_set.get(),
+                                    0x09 => self.minutes_set.get(),
+                                    0x0A => self.hours_set.get(),
+                                    0x0B => self.days_set.get() & 0b1111_1111,
+                                    0x0C => {
+                                        self.days_set.get() & (1 << 8)
+                                            | ((self.timer_halt as u64) << 6)
+                                            | ((self.day_overflow.get() as u64) << 7)
+                                    }
+                                }
+                            }) as u8
+                        }
+                        0x0D.. => unimplemented_mem_read(address),
+                    }
+                } else {
+                    0xFF
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+    fn write_u8(&mut self, address: u16, value: u8) {
+        match address {
+            0x0000..=0x1FFF => self.ram_enable = value & 0b1111 == 0xA,
+            0x2000..=0x3FFF => self.rom_bank = value as usize & 0b1111111,
+            0x4000..=0x5FFF => self.ram_bank_and_rtc_register = value as usize & 0b1111,
+            0x6000..=0x7FFF => match value {
+                0x00 => self.latch_progress = true,
+                0x01 if self.latch_progress => {
+                    self.rtc_latched = !self.rtc_latched;
+                    if self.rtc_latched {
+                        self.update_time();
+
+                        self.seconds_latched = self.seconds_set.get();
+                        self.minutes_latched = self.minutes_set.get();
+                        self.hours_latched = self.hours_set.get();
+                        self.days_latched = self.days_set.get();
+                        self.day_overflow_latched = self.day_overflow.get();
+                    }
+                    self.latch_progress = false;
+                }
+                _ => self.rtc_latched = false,
+            },
+            0xA000..=0xBFFF => {
+                if self.ram_enable {
+                    match self.ram_bank_and_rtc_register {
+                        0x00..=0x07 => {
+                            if self.ram_bank_and_rtc_register < self.ram_banks.len() {
+                                let bank = self.ram_bank_and_rtc_register % self.ram_banks.len();
+                                self.ram_banks[bank][address as usize - 0xA000] = value;
+                            }
+                        }
+                        register @ 0x08..=0x0C => {
+                            self.update_time();
+
+                            match register {
+                                0x08 => self.seconds_set.set(value as u64 % 60),
+                                0x09 => self.minutes_set.set(value as u64 % 60),
+                                0x0A => self.hours_set.set(value as u64 % 24),
+                                0x0B => self
+                                    .days_set
+                                    .update(|days_set| days_set & !0b1111_1111 | value as u64),
+                                0x0C => {
+                                    self.days_set.update(|days_set| {
+                                        days_set & !(1 << 8) | (value as u64 & 0b1) << 8
+                                    });
+                                    self.timer_halt = value & (1 << 6) != 0;
+                                    self.day_overflow.set(value & (1 << 7) != 0);
+                                }
+                                ..0x08 | 0x0D.. => unreachable!(),
+                            }
+                        }
+                        0x0D.. => unimplemented_mem_write(address, value),
+                    }
+                }
+            }
+            _ => unreachable!("Wrote to address 0x{address:04X}"),
+        }
+    }
+
+    fn new(rom: &[u8]) -> Self {
+        let rom_banks = match rom[0x148] {
+            0x00 => 2,
+            0x01 => 4,
+            0x02 => 8,
+            0x03 => 16,
+            0x04 => 32,
+            0x05 => 64,
+            0x06 => 128,
+            0x07 => 256,
+            0x08 => 512,
+            _ => unimplemented!(),
+        };
+
+        let ram_banks = match rom[0x149] {
+            0x00 => 0,
+            0x01 => unimplemented!(),
+            0x02 => 1,
+            0x03 => 4,
+            0x04 => 16,
+            0x05 => 8,
+            _ => unimplemented!(),
+        };
+
+        Self {
+            rom_banks: Vec::from(rom[0..rom_banks * 1024 * 16].as_chunks().0),
+            ram_banks: vec![[0; 1024 * 8]; ram_banks],
+            ..Default::default()
+        }
+    }
+}
+
+impl Mbc3 {
+    fn update_time(&self) {
+        if !self.timer_halt {
+            self.seconds_set.update(|seconds| {
+                seconds.wrapping_add(self.time_last_accessed.get().elapsed().as_secs()) % 60
+            });
+            self.minutes_set.update(|minutes| {
+                minutes.wrapping_add(self.time_last_accessed.get().elapsed().as_secs() / 60) % 60
+            });
+            self.hours_set.update(|hours| {
+                hours.wrapping_add(self.time_last_accessed.get().elapsed().as_secs() / (60 * 60))
+                    % 24
+            });
+
+            self.days_set.update(|days| {
+                let days_set = days.wrapping_add(
+                    self.time_last_accessed.get().elapsed().as_secs() / (60 * 60 * 24),
+                );
+                if days_set >= 512 {
+                    self.day_overflow.set(true);
+                }
+                days_set % 512
+            });
+        }
+
+        self.time_last_accessed.set(Instant::now());
     }
 }
 
@@ -650,6 +884,7 @@ impl Memory for MemoryBus {
         self.mapper = match rom[0x147] {
             0x00 => Mbc0::new(rom).into(),
             0x01..=0x03 => Mbc1::new(rom).into(),
+            0x0F..=0x13 => Mbc3::new(rom).into(),
             _ => unimplemented!(),
         }
     }

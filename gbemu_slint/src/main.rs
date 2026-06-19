@@ -14,7 +14,7 @@ use dasp::{Frame, Sample, Signal};
 use etcetera::{AppStrategy, AppStrategyArgs};
 use gbemu_core::{
     apu,
-    context::{Context, Io, Memory, MemoryBus, Serial},
+    context::{Context, InterruptRegister, Io, Memory, MemoryBus, Serial},
     cpu,
     ppu::{self, Mode},
     GameBoy, GameBoyButton,
@@ -485,13 +485,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         } = keyboard_event;
 
         if let Some(&button) = keybinds.get(&*event.text) {
-            gameboy.lock().set_joypad_state(
-                button,
-                match event_type {
-                    KeyEventType::Press => false,
-                    KeyEventType::Release => true,
-                },
-            );
+            using!([mut gameboy.lock()], {
+                gameboy.set_joypad_state(
+                    button,
+                    match event_type {
+                        KeyEventType::Press => false,
+                        KeyEventType::Release => true,
+                    },
+                );
+            });
         }
     }));
 
