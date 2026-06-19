@@ -1,0 +1,125 @@
+import {
+    AboutSlint,
+    VerticalBox,
+    GridBox,
+    CheckBox,
+    GroupBox,
+    Slider,
+} from "std-widgets.slint";
+
+export struct Tile {
+    index: int,
+    buffer: image,
+}
+
+enum TileMap { Background, Window }
+
+export component TileMapViewer inherits Window {
+
+    in-out property <TileMap> selected_map: Background;
+    in-out property <{ x: float, y: float }> scroll;
+
+    min-width: 400px;
+    min-height: 400px;
+    title: @tr("Tile Map Viewer");
+    in-out property <[Tile]> tiles;
+    // max-height: 1px / 0.0000000001;
+    // max-width: 1px / 0.00000000001;
+    changed selected_map => {
+        checkbox1.checked = selected_map == TileMap.Background;
+        checkbox2.checked = selected_map == TileMap.Window;
+    }
+    HorizontalLayout {
+        alignment: LayoutAlignment.stretch;
+        VerticalBox {
+            width: 200px;
+            alignment: LayoutAlignment.start;
+            horizontal-stretch: 0.1;
+            GroupBox {
+                title: @tr("Selected Map:");
+                VerticalBox {
+                    checkbox1 := CheckBox {
+                        checked: selected_map == TileMap.Background;
+                        text: @tr("Background");
+                        toggled => {
+                            selected_map = TileMap.Background;
+                            self.checked = true;
+                        }
+                    }
+
+                    checkbox2 := CheckBox {
+                        checked: selected_map == TileMap.Window;
+                        text: @tr("Window");
+                        toggled => {
+                            selected_map = TileMap.Window;
+                            self.checked = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            clip: false;
+            height: 100%;
+            max-width: 1px / 0;
+            horizontal-stretch: 1;
+            Rectangle {
+                background: magenta;
+                clip: true;
+                height: max(floor(min(parent.width, parent.height) / 256px), 1.0) * 256px;
+                width: max(floor(min(parent.width, parent.height) / 256px), 1.0) * 256px;
+
+                for tile in tiles: Image {
+                    x: floor(self.width / 1px * mod(tile.index, 32)) * 1px;
+                    y: self.height * (floor(tile.index / 32));
+                    width: 8 * parent.width / 256;
+                    height: 8 * parent.height / 256;
+                    source: tile.buffer;
+                    image-rendering: pixelated;
+                    TouchArea {
+                        clicked => {
+                            debug(parent.x, parent.y);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: scroll.x * parent.width / 256.0;
+                    y: scroll.y * parent.height / 256.0;
+                    width: 160 * parent.width / 256.0;
+                    height: 144 * parent.height / 256.0;
+                    border-color: magenta;
+                    border-width: 1px;
+                }
+
+                Rectangle {
+                    x: (scroll.x - 256) * parent.width / 256.0;
+                    y: scroll.y * parent.height / 256.0;
+                    width: 160 * parent.width / 256.0;
+                    height: 144 * parent.height / 256.0;
+                    border-color: magenta;
+                    border-width: 1px;
+                }
+
+                Rectangle {
+                    x: scroll.x * parent.width / 256.0;
+                    y: (scroll.y - 256) * parent.height / 256.0;
+                    width: 160 * parent.width / 256.0;
+                    height: 144 * parent.height / 256.0;
+                    border-color: magenta;
+                    border-width: 1px;
+                }
+
+                Rectangle {
+                    x: (scroll.x - 256) * parent.width / 256.0;
+                    y: (scroll.y - 256) * parent.height / 256.0;
+                    width: 160 * parent.width / 256.0;
+                    height: 144 * parent.height / 256.0;
+                    border-color: magenta;
+                    border-width: 1px;
+                }
+            }
+        }
+    }
+}

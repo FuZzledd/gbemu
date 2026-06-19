@@ -16,28 +16,29 @@ harness = false
 name = "mooneye"
 
 [dependencies]
-array-deque = "0.4.0"
-better_default = "1.0.5"
-bitvec = "1.0.1"
-blip_buf = "0.1.6"
-bytemuck = { version = "1.25.0", features = ["derive"] }
-bytes = "1.12.0"
-crossbeam = "0.8.4"
-dasp = "0.11.0"
-itertools = "0.14.0"
-log = "0.4.32"
-parking_lot = "0.12.5"
-paste = "1.0.15"
-rgb = "0.8.53"
-ringbuf = "0.5.0"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-spire_enum = "1.0.0"
-strum = { version = "0.28.0", features = ["derive"] }
-tap = "1.0.1"
-tracing = "0.1.44"
+array-deque = { workspace = true }
+better_default = { workspace = true }
+bitvec = { workspace = true }
+blip_buf = { workspace = true }
+bytemuck = { workspace = true, features = ["derive"] }
+bytes = { workspace = true }
+crossbeam = { workspace = true }
+dasp = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+paste = { workspace = true }
+rgb = { workspace = true }
+ringbuf = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+spire_enum = { workspace = true }
+strum = { workspace = true, features = ["derive"] }
+tap = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-datatest-stable = "0.3.3"
-image = "0.25.10"
-iterm2img = "0.1.0"
+base64 = { workspace = true }
+datatest-stable = { workspace = true }
+image = { workspace = true }
+iterm2img = { workspace = true }

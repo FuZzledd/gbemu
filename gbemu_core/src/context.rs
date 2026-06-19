@@ -85,18 +85,18 @@ pub struct Serial {
 
 #[repr(transparent)]
 #[derive(Default, TransparentWrapper)]
-pub struct SerialControlRegister(#[default(0b01111111)] u8);
+pub struct SerialControlRegister(#[default(0b01111110)] u8);
 impl SerialControlRegister {
     bit_getters!(transfer_enable, 7);
     bit_getters!(clock_speed, 1);
     bit_getters!(clock_select, 0);
 
     fn read(&self) -> u8 {
-        self.0 | 0b01111100
+        self.0 | 0b01111110
     }
 
     fn write(&mut self, value: u8) {
-        self.0 = value | 0b01111100;
+        self.0 = value | 0b01111110;
     }
 }
 
@@ -172,7 +172,7 @@ impl Timer {
             0x04 => (self.sc >> 6) as u8,
             0x05 => self.tima,
             0x06 => self.tma,
-            0x07 => self.tac,
+            0x07 => self.tac | 0b1111_1000,
             0x08.. => unreachable!(),
         }
     }
@@ -212,7 +212,7 @@ impl Timer {
                     _ => unreachable!(),
                 };
                 let sc_bit_prev = self.sc >> (selected_bit - 1) & 0b1 == 1;
-                self.tac = value;
+                self.tac = value | 0b1111_1000;
                 let selected_bit = match self.tac & 0b11 {
                     0b00 => 8,
                     0b01 => 2,
@@ -294,10 +294,10 @@ pub enum InterruptType {
 
 impl InterruptRegister for InterruptFlag {
     fn read(&self) -> u8 {
-        self.interrupt_flag
+        self.interrupt_flag | 0b1110_0000
     }
     fn write(&mut self, value: u8) {
-        self.interrupt_flag = value;
+        self.interrupt_flag = value | 0b1110_0000;
     }
 
     fn schedule_interrupt(&mut self, interrupt: InterruptType) {
@@ -778,8 +778,52 @@ pub struct MemoryBus {
     pub(crate) ie: u8,
 }
 
-impl MemoryBus {
-    pub fn read_u8(&self, address: u16) -> u8 {
+impl MemoryBus {}
+
+#[derive(Default)]
+pub struct Context<M: Memory + Default> {
+    pub memory: M,
+}
+
+#[derive(Default, Debug, PartialEq, Eq)]
+pub enum MemoryAccessSource {
+    #[default]
+    Default,
+    Oam,
+}
+
+pub trait Memory {
+    fn read_u8(&self, address: u16) -> u8 {
+        self.read_u8_with_source(address, MemoryAccessSource::Default)
+    }
+    fn write_u8(&mut self, address: u16, value: u8) {
+        self.write_u8_with_source(address, value, MemoryAccessSource::Default);
+    }
+
+    fn read_u8_with_source(&self, address: u16, source: MemoryAccessSource) -> u8;
+
+    fn write_u8_with_source(&mut self, address: u16, value: u8, source: MemoryAccessSource);
+
+    fn io(&self) -> &impl Io;
+    fn io_mut(&mut self) -> &mut impl Io;
+
+    fn ie(&self) -> &u8;
+    fn ie_mut(&mut self) -> &mut u8;
+
+    fn load_boot_rom(&mut self, rom: &[u8]);
+    fn load_rom(&mut self, rom: &[u8]);
+
+    fn tick_oam_dma(&mut self);
+}
+
+impl Memory for MemoryBus {
+    fn read_u8_with_source(&self, address: u16, source: MemoryAccessSource) -> u8 {
+        if !matches!(source, MemoryAccessSource::Oam)
+            && self.io.lcd.dma_counter.is_some()
+            && !matches!(address, 0xFF80..=0xFFFE)
+        {
+            return 0xFF;
+        }
         match address {
             0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.read_u8(address),
             0x8000..=0x9FFF => self.vram[address as usize - 0x8000],
@@ -803,7 +847,13 @@ impl MemoryBus {
         }
     }
 
-    pub fn write_u8(&mut self, address: u16, value: u8) {
+    fn write_u8_with_source(&mut self, address: u16, value: u8, source: MemoryAccessSource) {
+        if !matches!(source, MemoryAccessSource::Oam)
+            && self.io.lcd.dma_counter.is_some()
+            && !matches!(address, 0xFF80..=0xFFFE)
+        {
+            return;
+        }
         match address {
             0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.write_u8(address, value),
             0x8000..=0x9FFF => self.vram[address as usize - 0x8000] = value,
@@ -827,37 +877,6 @@ impl MemoryBus {
             0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80] = value,
             0xFFFF => self.ie = value,
         }
-    }
-}
-
-#[derive(Default)]
-pub struct Context<M: Memory + Default> {
-    pub memory: M,
-}
-
-pub trait Memory {
-    fn read_u8(&self, address: u16) -> u8;
-    fn write_u8(&mut self, address: u16, value: u8);
-
-    fn io(&self) -> &impl Io;
-    fn io_mut(&mut self) -> &mut impl Io;
-
-    fn ie(&self) -> &u8;
-    fn ie_mut(&mut self) -> &mut u8;
-
-    fn load_boot_rom(&mut self, rom: &[u8]);
-    fn load_rom(&mut self, rom: &[u8]);
-
-    fn tick_oam_dma(&mut self);
-}
-
-impl Memory for MemoryBus {
-    fn read_u8(&self, address: u16) -> u8 {
-        self.read_u8(address)
-    }
-
-    fn write_u8(&mut self, address: u16, value: u8) {
-        self.write_u8(address, value);
     }
 
     fn io(&self) -> &impl Io {
@@ -895,8 +914,15 @@ impl Memory for MemoryBus {
                 let offset = counter - 1;
 
                 let source_address = self.io.lcd.dma_source_address;
-                let value = self.read_u8(u16::from_le_bytes([offset, source_address]));
-                self.write_u8(u16::from_le_bytes([offset, 0xFE]), value);
+                let value = self.read_u8_with_source(
+                    u16::from_le_bytes([offset, source_address]),
+                    MemoryAccessSource::Oam,
+                );
+                self.write_u8_with_source(
+                    u16::from_le_bytes([offset, 0xFE]),
+                    value,
+                    MemoryAccessSource::Oam,
+                );
             }
             if counter == 159 {
                 None
@@ -993,6 +1019,14 @@ impl Memory for FlatMemory {
 
     fn write_u8(&mut self, address: u16, value: u8) {
         self.0[address as usize] = value;
+    }
+
+    fn read_u8_with_source(&self, address: u16, source: MemoryAccessSource) -> u8 {
+        todo!()
+    }
+
+    fn write_u8_with_source(&mut self, address: u16, value: u8, source: MemoryAccessSource) {
+        todo!()
     }
 
     fn io(&self) -> &impl Io {

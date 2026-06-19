@@ -6,13 +6,17 @@ export struct Tile {
 }
 
 export component TileViewer inherits Window {
-    title: @tr("Tile Viewer");
+    min-width: 250px;
+    min-height: 400px;
+    title: @tr("Tile Map Viewer");
     in-out property <[Tile]> tiles;
+    max-height: 1px / 0;
+    max-width: 1px / 0;
     GridBox {
         spacing: 0px;
         for tile in tiles: Image {
-            row: tile.index / 16;
-            col: mod(tile.index, 16);
+            row: tile.index / 32;
+            col: mod(tile.index, 32);
             width: 16px;
             height: 16px;
             source: tile.buffer;

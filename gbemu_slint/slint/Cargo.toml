@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-slint = { version = "1.16.1", features = ["backend-qt"] }
+slint = { workspace = true, features = ["backend-qt"] }
 
 
 [build-dependencies]
-slint-build = "1.16.1"
+slint-build = { workspace = true }

@@ -4,7 +4,7 @@ use better_default::Default;
 use tap::Conv;
 use tracing::{debug, error, instrument};
 
-use crate::context::{self, Context, InterruptRegister, Io, Memory};
+use crate::context::{self, Context, InterruptRegister, Io, Memory, MemoryBus};
 
 pub mod registers;
 
@@ -169,14 +169,14 @@ impl<T: Memory + Default> CPU<T> {
         ctx.memory.load_boot_rom(rom);
     }
 
-    pub fn load_rom(&mut self, rom: &[u8], ctx: &mut Context<T>) {
+    pub fn load_rom(&mut self, rom: &[u8], ctx: &mut Context<MemoryBus>) {
         *self = Default::default();
-        self.load_debug_initial_state(ctx);
         ctx.memory = Default::default();
+        self.load_debug_initial_state(ctx);
         ctx.memory.load_rom(rom);
     }
 
-    pub fn load_debug_initial_state(&mut self, _ctx: &mut Context<T>) {
+    pub fn load_debug_initial_state(&mut self, ctx: &mut Context<MemoryBus>) {
         self.registers.a = 0x01;
         *self.registers.f = 0xB0;
         self.registers.b = 0x00;
@@ -187,6 +187,34 @@ impl<T: Memory + Default> CPU<T> {
         self.registers.l = 0x4D;
         self.registers.sp = 0xFFFE;
         self.pc = 0x0100;
+
+        let io = &mut ctx.memory.io;
+        io.timer.sc = 0xAC << 6;
+        io.timer.tac = 0xF8;
+        io.interrupt.interrupt_flag = 0xE1;
+        *io.lcd.lcdc = 0x91;
+        *io.lcd.stat = 0x85;
+        io.lcd.dma = 0xFF;
+        io.lcd.bgp = 0xFC;
+        io.lcd.obp = [0xFF; 2];
+        io.audio.nr10.0 = 0x80;
+        io.audio.nr11.0 = 0xBF;
+        io.audio.nr12.0 = 0xF3;
+        io.audio.nr13_14.0 = 0xBF_FF;
+        io.audio.nr21.0 = 0x3F;
+        io.audio.nr22.0 = 0x00;
+        io.audio.nr23_24.0 = 0xBF_FF;
+        io.audio.nr30.0 = 0x7F;
+        io.audio.nr31.0 = 0xFF;
+        io.audio.nr32.0 = 0x9F;
+        io.audio.nr33_34.0 = 0xBF_FF;
+        io.audio.nr41.0 = 0xFF;
+        io.audio.nr42.0 = 0x00;
+        io.audio.nr43.0 = 0x00;
+        io.audio.nr44.0 = 0xBF;
+        io.audio.nr50.0 = 0x77;
+        io.audio.nr51.0 = 0xF3;
+        io.audio.nr52.0 = 0xF1;
     }
 
     pub fn dump_state(&mut self, ctx: &mut Context<T>) -> String {

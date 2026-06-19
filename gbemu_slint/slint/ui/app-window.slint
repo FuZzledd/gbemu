@@ -1,6 +1,7 @@
 import { Button, VerticalBox } from "std-widgets.slint";
 
 export {TileViewer} from "tile-viewer.slint";
+export { TileMapViewer } from "tilemap-viewer.slint";
 
 enum KeyEventType {
     press, release
@@ -20,11 +21,13 @@ export component AppWindow inherits Window {
     callback step_tick();
 
     callback toggle_tile_viewer();
+    callback toggle_tilemap_viewer();
     callback toggle_memory_viewer();
 
     callback key_event(KeyboardEvent);
 
     in-out property <bool> tile_viewer_shown: false;
+    in-out property <bool> tilemap_viewer_shown: false;
     in-out property <bool> memory_viewer_shown: false;
 
     in-out property <bool> paused: true;
@@ -34,7 +37,7 @@ export component AppWindow inherits Window {
     in property <[RecentRom]> recent;
 
     in property <float> fps: 0;
-    in-out property <image> screen: @image-url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACQCAYAAACPtWCAAAAACXBIWXMAAA7EAAAOxAGVKw4bAAABhUlEQVR4nO3UMREAIAADsYJ/zyDjl8RAl7+ebW8QudUwCJCcByQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICJCVAUgIkJUBSAiQlQFICZKUPfgECH79JdFcAAAAASUVORK5CYII=");
+    in-out property <image> screen;
 
     function restore_focus() {
         key-handler.focus();
@@ -43,13 +46,17 @@ export component AppWindow inherits Window {
     forward-focus: key-handler;
 
     key-handler := FocusScope {
-        key-pressed(event) => {
+        focus-lost(reason) => {
+            debug("Lost focus ", reason);
+        }
+
+        capture-key-pressed(event) => {
             if !event.repeat {
                 key_event({ event: event, type: KeyEventType.press });
             }
             accept
         }
-        key-released(event) => {
+        capture-key-released(event) => {
             if !event.repeat {
                 key_event( { event: event, type: KeyEventType.release });
             }
@@ -166,6 +173,15 @@ export component AppWindow inherits Window {
             }
 
             MenuItem {
+                title: @tr("Tile Map Viewer");
+                checkable: true;
+                checked <=> tilemap_viewer_shown;
+                activated => {
+                    toggle_tilemap_viewer()
+                }
+            }
+
+            MenuItem {
                 title: @tr("Memory Viewer");
                 checkable: true;
                 checked <=> memory_viewer_shown;
@@ -182,6 +198,7 @@ export component AppWindow inherits Window {
         forward-focus: key-handler;
 
         Rectangle {
+            background: black;
             width: 160px * scale_factor;
             height: 144px * scale_factor;
             Text {

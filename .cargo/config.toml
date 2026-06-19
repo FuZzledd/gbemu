@@ -16,8 +16,6 @@ rustflags = ["-C", "link-arg=/STACK:8000000"]
 rustflags = ["-C", "link-arg=/STACK:8000000"]
 
 [profile.dev]
-lto = "thin"
-
 [profile.dev.package."*"]
 codegen-backend = "llvm"
 

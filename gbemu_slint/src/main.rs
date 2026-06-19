@@ -16,10 +16,11 @@ use gbemu_core::{
     apu,
     context::{Context, InterruptRegister, Io, Memory, MemoryBus, Serial},
     cpu,
-    ppu::{self, Mode},
+    ppu::{self, Mode, Pixel},
     GameBoy, GameBoyButton,
 };
 use indexmap::IndexSet;
+use itertools::Itertools;
 use log::info;
 use ringbuf::traits::Consumer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
@@ -48,7 +49,7 @@ use std::{
     hash_map,
     io::{BufWriter, Write},
 };
-use tap::Pipe;
+use tap::{Conv, Pipe};
 use tracing::instrument;
 use uzi::using;
 
@@ -274,10 +275,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let tile_viewer = TileViewer::new()?;
     let tile_viewer_handle = tile_viewer.as_weak();
 
+    let tilemap_viewer = TileMapViewer::new()?;
+
     tile_viewer
         .window()
         .on_close_requested(using!([ui_handle], move || {
             ui_handle.upgrade().unwrap().set_tile_viewer_shown(false);
+            CloseRequestResponse::HideWindow
+        }));
+
+    tilemap_viewer
+        .window()
+        .on_close_requested(using!([ui_handle], move || {
+            ui_handle.upgrade().unwrap().set_tilemap_viewer_shown(false);
             CloseRequestResponse::HideWindow
         }));
 
@@ -286,9 +296,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         CloseRequestResponse::KeepWindowShown
     });
 
-    ui.on_toggle_tile_viewer(using!([ui_handle, tile_viewer_handle], move || {
+    ui.on_toggle_tile_viewer(using!([ui_handle, tile_viewer.as_weak()], move || {
         let tile_viewer_shown = ui_handle.upgrade().unwrap().get_tile_viewer_shown();
-        let tile_viewer = tile_viewer_handle.upgrade().unwrap();
+        let tile_viewer = tile_viewer.upgrade().unwrap();
         if tile_viewer_shown {
             tile_viewer.show().unwrap();
         } else {
@@ -296,48 +306,62 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }));
 
+    ui.on_toggle_tilemap_viewer(using!([ui_handle, tilemap_viewer.as_weak()], move || {
+        let tilemap_viewer_shown = ui_handle.upgrade().unwrap().get_tilemap_viewer_shown();
+        let tilemap_viewer = tilemap_viewer.upgrade().unwrap();
+        if tilemap_viewer_shown {
+            tilemap_viewer.show().unwrap();
+        } else {
+            tilemap_viewer.hide().unwrap();
+        }
+    }));
+
     let (playback_controller, playback_receiver) = crossbeam::channel::bounded::<bool>(10);
 
     thread::spawn(using!(
-        [ui_handle, gameboy, tile_viewer_handle],
+        [
+            ui_handle,
+            gameboy,
+            tile_viewer.as_weak(),
+            tilemap_viewer.as_weak()
+        ],
         move || {
             let mut is_playing = false;
             let mut prev_frame_time = Instant::now();
             loop {
-                select! {
-                    recv(playback_receiver) -> playback_status => {
-                        is_playing = playback_status.unwrap();
-                    },
-                    default => {
-                        if is_playing {
-                            let target_time = Instant::now() + Duration::from_secs_f64(1.0 / 59.73);
-                            loop {
-                                let mut gameboy = gameboy.lock();
-                                let redraw_request = gameboy.tick(false);
-                                if redraw_request {
-                                    redraw(&gameboy, &ui_handle, &tile_viewer_handle);
-                                    let delta_time = prev_frame_time.elapsed().as_secs_f32();
-                                    ui_handle
-                                        .upgrade_in_event_loop(move |handle| {
-                                            handle.set_fps(1.0 / delta_time);
-                                        })
-                                        .unwrap();
-                                    prev_frame_time = Instant::now();
-                                    break;
-                                }
-                                for byte in gameboy.context.memory.io.serial.output.pop_iter() {
-                                    println!("0x{byte:02X}");
-                                }
-                            }
+                if !is_playing {
+                    let playback_status = playback_receiver.recv();
+                    is_playing = playback_status.unwrap();
+                } else {
+                    if let Ok(playback_status) = playback_receiver.try_recv() {
+                        is_playing = playback_status;
+                    }
 
-                            spin_sleep::SpinSleeper::default()
-                                .with_spin_strategy(spin_sleep::SpinStrategy::SpinLoopHint)
-                                .sleep_until(target_time);
+                    let target_time = Instant::now() + Duration::from_secs_f64(1.0 / 59.73);
+                    loop {
+                        let mut gameboy = gameboy.lock();
+                        let redraw_request = gameboy.tick(false);
+                        if redraw_request {
+                            redraw(&gameboy, &ui_handle, &tile_viewer, &tilemap_viewer);
+                            let delta_time =
+                                prev_frame_time.elapsed().as_secs_f32().max(1.0 / 59.73);
+                            ui_handle
+                                .upgrade_in_event_loop(move |handle| {
+                                    handle.set_fps(1.0 / delta_time);
+                                })
+                                .unwrap();
+                            prev_frame_time = Instant::now();
+                            break;
+                        }
+                        for byte in gameboy.context.memory.io.serial.output.pop_iter() {
+                            println!("0x{byte:02X}");
                         }
                     }
-                }
 
-                std::hint::spin_loop();
+                    spin_sleep::SpinSleeper::default()
+                        .with_spin_strategy(spin_sleep::SpinStrategy::SpinLoopHint)
+                        .sleep_until(target_time);
+                }
             }
         }
     ));
@@ -453,17 +477,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             gameboy,
             ui.as_weak(),
             tile_viewer.as_weak(),
+            tilemap_viewer.as_weak()
             playback_controller
         ],
         move || {
             let ui = ui.upgrade().unwrap();
-            let tile_viewer = tile_viewer.upgrade().unwrap();
             playback_controller.send(false).unwrap();
             ui.set_paused(true);
 
             let mut gameboy = gameboy.lock();
             gameboy.tick(true);
-            redraw(&gameboy, &ui.as_weak(), &tile_viewer.as_weak());
+            redraw(&gameboy, &ui.as_weak(), &tile_viewer, &tilemap_viewer);
         }
     ));
 
@@ -504,7 +528,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn redraw(gameboy: &GameBoy, ui_handle: &Weak<AppWindow>, tile_viewer_handle: &Weak<TileViewer>) {
+fn redraw(
+    gameboy: &GameBoy,
+    ui_handle: &Weak<AppWindow>,
+    tile_viewer_handle: &Weak<TileViewer>,
+    tilemap_viewer_handle: &Weak<TileMapViewer>,
+) {
     let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&gameboy.buffer, 160, 144);
 
     let tiles: Vec<_> = gameboy
@@ -518,16 +547,15 @@ fn redraw(gameboy: &GameBoy, ui_handle: &Weak<AppWindow>, tile_viewer_handle: &W
             SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
                 &x.pipe(|data| data.as_chunks::<2>().0)
                     .iter()
-                    .cloned()
+                    .copied()
                     .flat_map(|[left, right]| {
                         let row = ((left as u16) << 8) | right as u16;
                         (0..8)
                             .map(move |index| row.extract_bits(0b1000_0000_1000_0000 >> index))
-                            .flat_map(|colour| match colour {
-                                0 => [0xFF, 0xFF, 0xFF, 0xFF],
-                                1 => [0xBC, 0xBC, 0xBC, 0xFF],
-                                2 => [0x80, 0x80, 0x80, 0xFF],
-                                _ => [0x0, 0x0, 0x0, 0xFF],
+                            .map(|colour| gameboy.context.memory.io.lcd.bgp >> (colour * 2) & 0b11)
+                            .flat_map(|colour| {
+                                gameboy.palette[&Pixel::from_repr(colour).unwrap()]
+                                    .conv::<[u8; 4]>()
                             })
                     })
                     .collect::<Vec<_>>(),
@@ -536,6 +564,77 @@ fn redraw(gameboy: &GameBoy, ui_handle: &Weak<AppWindow>, tile_viewer_handle: &W
             )
         })
         .collect();
+
+    let mapping = gameboy.context.memory.io.lcd.lcdc.tile_data_mapping();
+    let tile_maps = [
+        gameboy.context.memory.io.lcd.lcdc.bg_tile_map(),
+        gameboy.context.memory.io.lcd.lcdc.window_tile_map(),
+    ]
+    .map(|map_area| {
+        let map = gameboy.context.memory.vram.tile_map(map_area);
+        map.iter()
+            .copied()
+            .map(|tile_id| {
+                let tile = gameboy.context.memory.vram.bg_tile_data(mapping, tile_id);
+
+                SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    &tile
+                        .pipe(|data| data.as_chunks::<2>().0)
+                        .iter()
+                        .copied()
+                        .flat_map(|[left, right]| {
+                            let row = ((left as u16) << 8) | right as u16;
+                            (0..8)
+                                .map(move |index| row.extract_bits(0b1000_0000_1000_0000 >> index))
+                                .map(|colour| {
+                                    gameboy.context.memory.io.lcd.bgp >> (colour * 2) & 0b11
+                                })
+                                .flat_map(|colour| {
+                                    gameboy.palette[&Pixel::from_repr(colour).unwrap()]
+                                        .conv::<[u8; 4]>()
+                                })
+                        })
+                        .collect::<Vec<_>>(),
+                    8,
+                    8,
+                )
+            })
+            .collect_vec()
+    });
+    let (scroll_x, scroll_y) = gameboy
+        .context
+        .memory
+        .io
+        .lcd
+        .pipe_ref(|lcd| (lcd.scx, lcd.scy));
+
+    tilemap_viewer_handle
+        .upgrade_in_event_loop(move |handle| {
+            let tiles = match handle.get_selected_map() {
+                TileMap::Background => &tile_maps[0],
+                TileMap::Window => &tile_maps[1],
+            };
+
+            let model = ModelRc::from(
+                tiles
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(index, buffer)| Tile {
+                        index: index as i32,
+                        buffer: Image::from_rgba8(buffer),
+                    })
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            );
+            handle.set_tiles(model);
+            handle.set_scroll(if handle.get_selected_map() == TileMap::Background {
+                (scroll_x as f32, scroll_y as f32)
+            } else {
+                (0.0, 0.0)
+            });
+        })
+        .unwrap();
 
     ui_handle
         .upgrade_in_event_loop(move |handle| {

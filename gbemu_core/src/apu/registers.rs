@@ -6,7 +6,7 @@ use strum::FromRepr;
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct AudioEnable(#[default(0b11111111)] u8);
+pub struct AudioEnable(#[default(0b11111111)] pub(crate) u8);
 
 impl AudioEnable {
     pub fn audio_enabled(&self) -> bool {
@@ -58,7 +58,7 @@ impl AudioEnable {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct AudioPanning(#[default(0b11111111)] u8);
+pub struct AudioPanning(#[default(0b11111111)] pub(crate) u8);
 
 impl AudioPanning {
     pub fn read(&self) -> u8 {
@@ -135,7 +135,7 @@ impl AudioPanning {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct AudioVolume(#[default(0b01110111)] u8);
+pub struct AudioVolume(#[default(0b01110111)] pub(crate) u8);
 
 impl AudioVolume {
     pub fn read(&self) -> u8 {
@@ -205,7 +205,7 @@ impl From<SweepDirection> for bool {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelSweep(#[default(0b1000_0000)] u8);
+pub struct ChannelSweep(#[default(0b1000_0000)] pub(crate) u8);
 
 impl ChannelSweep {
     pub fn read(&self) -> u8 {
@@ -261,7 +261,7 @@ impl WaveDuty {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelLengthTimerWithDuty(#[default(0b00111111)] u8);
+pub struct ChannelLengthTimerWithDuty(#[default(0b00111111)] pub(crate) u8);
 
 impl ChannelLengthTimerWithDuty {
     pub fn wave_duty(&self) -> WaveDuty {
@@ -316,7 +316,7 @@ impl From<EnvelopeDirection> for bool {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelVolumeEnvelope(#[default(0b11110000)] u8);
+pub struct ChannelVolumeEnvelope(#[default(0b11110000)] pub(crate) u8);
 
 impl ChannelVolumeEnvelope {
     pub fn read(&self) -> u8 {
@@ -352,7 +352,7 @@ impl ChannelVolumeEnvelope {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelPeriodControl(#[default(0b01111111_11111111)] u16);
+pub struct ChannelPeriodControl(#[default(0b01111111_11111111)] pub(crate) u16);
 impl ChannelPeriodControl {
     pub fn read(&self) -> u16 {
         self.0 | 0b10111111_11111111
@@ -390,7 +390,7 @@ impl ChannelPeriodControl {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelDacEnable(#[default(0b11111111)] u8);
+pub struct ChannelDacEnable(#[default(0b11111111)] pub(crate) u8);
 impl ChannelDacEnable {
     pub fn read(&self) -> u8 {
         self.0 | 0b0111_1111
@@ -410,7 +410,7 @@ impl ChannelDacEnable {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelLengthTimer(#[default(0b11111111)] u8);
+pub struct ChannelLengthTimer(#[default(0b11111111)] pub(crate) u8);
 impl ChannelLengthTimer {
     pub fn read(&self) -> u8 {
         0b11111111
@@ -431,7 +431,7 @@ impl ChannelLengthTimer {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelVolume(#[default(0b10111111)] u8);
+pub struct ChannelVolume(#[default(0b10111111)] pub(crate) u8);
 impl ChannelVolume {
     pub fn read(&self) -> u8 {
         self.0 | 0b10011111
@@ -477,7 +477,7 @@ impl From<LfsrWidth> for bool {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelFrequencyRandomness(#[default(0b11111111)] u8);
+pub struct ChannelFrequencyRandomness(#[default(0b11111111)] pub(crate) u8);
 impl ChannelFrequencyRandomness {
     pub fn read(&self) -> u8 {
         self.0
@@ -509,7 +509,7 @@ impl ChannelFrequencyRandomness {
 
 #[derive(Default, Debug, TransparentWrapper)]
 #[repr(transparent)]
-pub struct ChannelControl(#[default(0b11111111)] u8);
+pub struct ChannelControl(#[default(0b11111111)] pub(crate) u8);
 impl ChannelControl {
     pub fn read(&self) -> u8 {
         self.0 | 0b10111111

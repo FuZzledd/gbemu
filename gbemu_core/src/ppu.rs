@@ -15,12 +15,12 @@ use better_default::Default;
 use bytemuck::TransparentWrapper;
 use paste::paste;
 use strum::FromRepr;
-use tap::Pipe;
+use tap::{Pipe, Tap};
 use tracing::instrument;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Lcdc(u8);
+pub struct Lcdc(u8);
 
 impl DerefMut for Lcdc {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -38,7 +38,7 @@ impl Deref for Lcdc {
 impl Lcdc {
     bit_getters!(enable, 7);
 
-    fn window_tile_map(&self) -> TileMapArea {
+    pub fn window_tile_map(&self) -> TileMapArea {
         TileMapArea::from_repr(get_bit(self.0, 6) as u8).unwrap()
     }
 
@@ -48,7 +48,7 @@ impl Lcdc {
 
     bit_getters!(window_enable, 5);
 
-    fn tile_data_mapping(&self) -> TileDataMapping {
+    pub fn tile_data_mapping(&self) -> TileDataMapping {
         TileDataMapping::from_repr(get_bit(self.0, 4) as u8).unwrap()
     }
 
@@ -56,7 +56,7 @@ impl Lcdc {
         set_bit(&mut self.0, 4, map as u8 != 0);
     }
 
-    fn bg_tile_map(&self) -> TileMapArea {
+    pub fn bg_tile_map(&self) -> TileMapArea {
         TileMapArea::from_repr(get_bit(self.0, 3) as u8).unwrap()
     }
 
@@ -79,7 +79,7 @@ impl Lcdc {
 
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(transparent)]
-struct Stat(u8);
+pub struct Stat(u8);
 
 impl DerefMut for Stat {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -112,17 +112,17 @@ impl Stat {
 
 #[derive(Debug, Default)]
 pub struct LCDRegisters {
-    lcdc: Lcdc,
-    stat: Stat,
-    scy: u8,
-    scx: u8,
+    pub lcdc: Lcdc,
+    pub(crate) stat: Stat,
+    pub scy: u8,
+    pub scx: u8,
     pub ly: u8,
-    lyc: u8,
-    dma: u8,
-    bgp: u8,
-    obp: [u8; 2],
-    wy: u8,
-    wx: u8,
+    pub(crate) lyc: u8,
+    pub(crate) dma: u8,
+    pub bgp: u8,
+    pub(crate) obp: [u8; 2],
+    pub(crate) wy: u8,
+    pub(crate) wx: u8,
     start_dma: bool,
     pub(crate) dma_source_address: u8,
     pub(crate) dma_counter: Option<u8>,
@@ -150,7 +150,7 @@ impl LCDRegisters {
     pub(crate) fn write(&mut self, address: u8, value: u8) {
         match address {
             0x40 => *self.lcdc = value,
-            0x41 => *self.stat = (*self.stat & 0b111) | (value & !0b111),
+            0x41 => *self.stat = (*self.stat & 0b111) | (value & !0b111) | 0b1000_0000,
             0x42 => self.scy = value,
             0x43 => self.scx = value,
             0x44 => {}
@@ -192,21 +192,21 @@ impl Deref for Vram {
 
 #[derive(Copy, Clone, Debug, FromRepr)]
 #[repr(u8)]
-enum TileMapArea {
+pub enum TileMapArea {
     Zero,
     One,
 }
 
 #[derive(Copy, Clone, Debug, FromRepr)]
 #[repr(u8)]
-enum ObjSize {
+pub enum ObjSize {
     Square,
     Tall,
 }
 
 #[derive(Copy, Clone, Debug, FromRepr)]
 #[repr(u8)]
-enum TileDataMapping {
+pub enum TileDataMapping {
     Zero = 1,
     One = 0,
 }
@@ -218,28 +218,21 @@ impl Vram {
         &self.0[0x8000 - VRAM_BASE_ADDRESS..=0x97FF - VRAM_BASE_ADDRESS]
     }
 
-    fn tile_map(&self, index: TileMapArea) -> &[u8] {
+    pub fn tile_map(&self, index: TileMapArea) -> &[u8] {
         &self.0[Self::get_tile_map_range(index)]
     }
     fn tile_map_mut(&mut self, index: TileMapArea) -> &mut [u8] {
         &mut self.0[Self::get_tile_map_range(index)]
     }
 
-    fn get_tile_map_range(index: TileMapArea) -> std::ops::RangeInclusive<usize> {
+    pub fn get_tile_map_range(index: TileMapArea) -> std::ops::RangeInclusive<usize> {
         match index {
             TileMapArea::Zero => 0x9800 - VRAM_BASE_ADDRESS..=0x9BFF - VRAM_BASE_ADDRESS,
             TileMapArea::One => 0x9C00 - VRAM_BASE_ADDRESS..=0x9FFF - VRAM_BASE_ADDRESS,
         }
     }
 
-    fn window_tile_map(&self, ctx: &Context<MemoryBus>) -> &[u8] {
-        self.tile_map(ctx.memory.io.lcd.lcdc.window_tile_map())
-    }
-    fn window_tile_map_mut(&mut self, ctx: &mut Context<MemoryBus>) -> &mut [u8] {
-        self.tile_map_mut(ctx.memory.io.lcd.lcdc.window_tile_map())
-    }
-
-    fn sprite_tile_data(&self, sprite_size: ObjSize, tile_no: u8) -> &[u8] {
+    pub fn sprite_tile_data(&self, sprite_size: ObjSize, tile_no: u8) -> &[u8] {
         let tile_data = &self.0[0x8000 - VRAM_BASE_ADDRESS..=0x8FFF - VRAM_BASE_ADDRESS];
         let (tiles, []) = tile_data.as_chunks::<16>() else {
             unreachable!()
@@ -255,7 +248,7 @@ impl Vram {
         }
     }
 
-    fn bg_tile_data(&self, mapping: TileDataMapping, tile_no: u8) -> &[u8; 16] {
+    pub fn bg_tile_data(&self, mapping: TileDataMapping, tile_no: u8) -> &[u8; 16] {
         match mapping {
             TileDataMapping::Zero => {
                 let tile_data = &self.0[0x8000 - VRAM_BASE_ADDRESS..=0x8FFF - VRAM_BASE_ADDRESS];
@@ -700,6 +693,7 @@ impl PPU {
                 self.screen_x = self.screen_x.wrapping_add(1);
                 self.sprites_fetched = false;
                 if self.screen_x == 160 {
+                    self.in_window = false;
                     self.current_mode = Mode::HBlank;
                     self.bg_fetcher_state.clear();
                     self.sprite_fetcher_state.clear();
