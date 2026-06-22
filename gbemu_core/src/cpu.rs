@@ -239,6 +239,7 @@ impl<T: Memory + Default> CPU<T> {
 
     #[instrument(skip_all)]
     pub fn tick(&mut self, ctx: &mut Context<T>) {
+        debug!("{}", self.dump_state(ctx));
         if self.halted && (ctx.memory.io().interrupt_flag().read() & ctx.memory.ie() & 0b11111) != 0
         {
             self.halted = false;

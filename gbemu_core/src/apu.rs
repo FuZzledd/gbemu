@@ -1,26 +1,16 @@
-use core::{cell::UnsafeCell, cmp, sync::atomic::AtomicU64};
-use std::{
-    collections::VecDeque,
-    sync::{Arc, LazyLock},
-};
+use core::cmp;
 
 use crate::{
     apu::registers::EnvelopeDirection,
     context::{Io, TimerRegister},
 };
-use crate::{
-    apu::registers::{AudioVolume, ChannelPeriodControl},
-    context::{Context, Memory},
-};
-use array_deque::StackArrayDeque;
+use crate::context::{Context, Memory};
 use better_default::Default;
 use bitvec::prelude::*;
 use blip_buf::BlipBuf;
 use crossbeam::channel::{self, Receiver, Sender};
 use dasp::Frame;
-use parking_lot::Mutex;
-use tap::Conv;
-use tracing::{info, instrument};
+use tracing::instrument;
 
 pub(crate) mod registers;
 
@@ -126,7 +116,7 @@ fn to_i32(value: u8) -> i32 {
     -2000 * value as i32 + 16000
 }
 fn dac(value: u8) -> f64 {
-    -1.0 * (value as f64) / 15.0 + 0.5
+    -(value as f64) / 15.0 + 0.5
 }
 
 #[derive(Default)]
@@ -173,7 +163,7 @@ impl Channel1 {
         ctx: &mut Context<M>,
         div_apu: u8,
         cycle_count: u64,
-        clocks: u32,
+        _clocks: u32,
     ) -> f64 {
         if ctx.memory.io().audio().nr10().pace() == 0 {
             self.sweep_pace = 0;
@@ -357,7 +347,7 @@ impl Channel2 {
         ctx: &mut Context<M>,
         div_apu: u8,
         cycle_count: u64,
-        clocks: u32,
+        _clocks: u32,
     ) -> f64 {
         self.duty_cycle = ctx.memory.io().audio().nr21().wave_duty();
         self.length_enable = ctx.memory.io().audio().nr23_24().length_enable();
@@ -411,7 +401,7 @@ impl Channel2 {
     }
 
     #[allow(clippy::collapsible_if)]
-    fn div_apu_tick<M: Default + Memory>(&mut self, ctx: &mut Context<M>, div_apu: u8) {
+    fn div_apu_tick<M: Default + Memory>(&mut self, _ctx: &mut Context<M>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
         }
@@ -492,7 +482,7 @@ impl Channel3 {
         ctx: &mut Context<M>,
         div_apu: u8,
         cycle_count: u64,
-        clocks: u32,
+        _clocks: u32,
     ) -> f64 {
         self.length_enable = ctx.memory.io().audio().nr33_34().length_enable();
         let triggered = ctx.memory.io().audio().nr33_34().trigger();
@@ -559,7 +549,7 @@ impl Channel3 {
     }
 
     #[allow(clippy::collapsible_if)]
-    fn div_apu_tick<M: Default + Memory>(&mut self, ctx: &mut Context<M>, div_apu: u8) {
+    fn div_apu_tick<M: Default + Memory>(&mut self, _ctx: &mut Context<M>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
         }

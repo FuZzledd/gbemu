@@ -2,9 +2,13 @@
 #![feature(hash_map_macro)]
 
 use core::ops::{BitAnd, BitOr, Not, Shl, Shr};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::LazyLock,
+};
 
 use bytes::BytesMut;
+use crossbeam::channel::{Receiver, Sender};
 use rgb::Rgba;
 use tap::Conv;
 use tracing::instrument;
@@ -69,6 +73,9 @@ pub enum GameBoyButton {
     Down,
 }
 
+static PLAYBACK_CONTROLLER: LazyLock<(Sender<bool>, Receiver<bool>)> =
+    LazyLock::new(crossbeam::channel::unbounded);
+
 pub struct GameBoy {
     pub buffer: BytesMut,
     pub context: Context<MemoryBus>,
@@ -77,10 +84,20 @@ pub struct GameBoy {
     pub apu: apu::APU,
     pub counter: u64,
     pub palette: HashMap<Pixel, Rgba<u8>>,
+    pub playback_receiver: Receiver<bool>,
+    pub playing: bool,
 }
+
 impl GameBoy {
     #[instrument(skip_all)]
     pub fn tick(&mut self, manual: bool) -> bool {
+        if let Ok(status) = self.playback_receiver.try_recv() {
+            self.playing = status;
+        }
+        if !self.playing && !manual {
+            return false || manual;
+        }
+
         if self.counter.is_multiple_of(4) {
             self.cpu.tick(&mut self.context);
             self.context.memory.tick_oam_dma();
@@ -146,6 +163,8 @@ impl Default for GameBoy {
         let ppu = ppu::PPU::default();
         let apu = apu::APU::default();
 
+        let playback_receiver = PLAYBACK_CONTROLLER.1.clone();
+
         let mut buffer = BytesMut::zeroed(160 * 144 * 4);
         for pixel in buffer.as_chunks_mut::<4>().0 {
             pixel[3] = 0xFF
@@ -166,6 +185,8 @@ impl Default for GameBoy {
             apu,
             counter: 0,
             palette,
+            playback_receiver,
+            playing: true,
         }
     }
 }

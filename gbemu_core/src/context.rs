@@ -1,7 +1,9 @@
-use core::{cell::Cell, ops::BitAnd};
+use core::{
+    cell::Cell,
+    range::Range,
+};
 use std::{
-    io::{self, Write},
-    process::Output,
+    io::Write,
     time::Instant,
 };
 
@@ -9,7 +11,6 @@ use better_default::Default;
 use bitvec::{access::BitSafe, prelude::*};
 use bytemuck::TransparentWrapper;
 use ringbuf::{StaticRb, traits::RingBuffer};
-use serde::de::value;
 use spire_enum::prelude::{delegate_impl, delegated_enum};
 use strum::FromRepr;
 use tracing::{debug, info};
@@ -17,7 +18,7 @@ use tracing::{debug, info};
 use crate::{
     apu::{AudioRegister, AudioRegisters},
     bit_getters,
-    ppu::{LCDRegisters, Oam, Vram},
+    ppu::{DmaStatus, LCDRegisters, Oam, Vram},
 };
 
 pub(crate) type Memory16K = [u8; 1024 * 16];
@@ -427,14 +428,16 @@ impl Mapper for Mbc0 {
             0x0000..=0x3FFF => {
                 println!(
                     "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
-                )
+                );
+                // let _ = PLAYBACK_CONTROLLER.0.send(false);
             } //self.rom[address as usize] = value,
             0x4000..=0x7FFF => {
                 // TODO: switchable rom banks
                 //self.rom_banks[0][address as usize - 0x4000] = value
                 println!(
                     "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
-                )
+                );
+                // let _ = PLAYBACK_CONTROLLER.0.send(false);
             }
             0xA000..=0xBFFF => self.external_ram[address as usize - 0xA000] = value,
             _ => unreachable!(),
@@ -819,8 +822,14 @@ pub trait Memory {
 impl Memory for MemoryBus {
     fn read_u8_with_source(&self, address: u16, source: MemoryAccessSource) -> u8 {
         if !matches!(source, MemoryAccessSource::Oam)
-            && self.io.lcd.dma_counter.is_some()
-            && !matches!(address, 0xFF80..=0xFFFE)
+            && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
+            && (matches!(
+                (self.io.lcd.dma_source_address, address),
+                (0x80..=0x9F, 0x8000..=0x9FFF)
+            ) || matches!(
+                (self.io.lcd.dma_source_address, address),
+                (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
+            ))
         {
             return 0xFF;
         }
@@ -849,8 +858,14 @@ impl Memory for MemoryBus {
 
     fn write_u8_with_source(&mut self, address: u16, value: u8, source: MemoryAccessSource) {
         if !matches!(source, MemoryAccessSource::Oam)
-            && self.io.lcd.dma_counter.is_some()
-            && !matches!(address, 0xFF80..=0xFFFE)
+            && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
+            && (matches!(
+                (self.io.lcd.dma_source_address, address),
+                (0x80..=0x9F, 0x8000..=0x9FFF)
+            ) || matches!(
+                (self.io.lcd.dma_source_address, address),
+                (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
+            ))
         {
             return;
         }
@@ -895,7 +910,7 @@ impl Memory for MemoryBus {
         &mut self.ie
     }
 
-    fn load_boot_rom(&mut self, rom: &[u8]) {
+    fn load_boot_rom(&mut self, _rom: &[u8]) {
         // self.rom[..rom.len()].copy_from_slice(rom);
     }
 
@@ -909,29 +924,35 @@ impl Memory for MemoryBus {
     }
 
     fn tick_oam_dma(&mut self) {
-        self.io.lcd.dma_counter = if let Some(counter) = self.io.lcd.dma_counter {
-            if counter > 0 {
-                let offset = counter - 1;
+        match self.io.lcd.dma_counter {
+            DmaStatus::Queued { address } => {
+                self.io.lcd.dma_counter = DmaStatus::Running(Range::from(0..160).into_iter());
+                self.io.lcd.dma_source_address = address;
+            }
+            DmaStatus::Running(ref mut counter) => {
+                if let Some(offset) = counter.next() {
+                    let len = counter.len();
+                    let source_address = self.io.lcd.dma_source_address;
+                    let value = self.read_u8_with_source(
+                        u16::from_le_bytes([offset, source_address]),
+                        MemoryAccessSource::Oam,
+                    );
+                    self.write_u8_with_source(
+                        u16::from_le_bytes([offset, 0xFE]),
+                        value,
+                        MemoryAccessSource::Oam,
+                    );
+                    if len == 0 {
+                        self.io.lcd.dma_counter = DmaStatus::Done;
+                    }
+                }
+            }
+            DmaStatus::Done => {}
+        }
 
-                let source_address = self.io.lcd.dma_source_address;
-                let value = self.read_u8_with_source(
-                    u16::from_le_bytes([offset, source_address]),
-                    MemoryAccessSource::Oam,
-                );
-                self.write_u8_with_source(
-                    u16::from_le_bytes([offset, 0xFE]),
-                    value,
-                    MemoryAccessSource::Oam,
-                );
-            }
-            if counter == 159 {
-                None
-            } else {
-                Some(counter + 1)
-            }
-        } else {
-            None
-        };
+        if let Some(address) = self.io.lcd.dma_request.take() {
+            self.io.lcd.dma_counter = DmaStatus::Queued { address };
+        }
     }
 }
 
@@ -1021,11 +1042,11 @@ impl Memory for FlatMemory {
         self.0[address as usize] = value;
     }
 
-    fn read_u8_with_source(&self, address: u16, source: MemoryAccessSource) -> u8 {
+    fn read_u8_with_source(&self, _address: u16, _source: MemoryAccessSource) -> u8 {
         todo!()
     }
 
-    fn write_u8_with_source(&mut self, address: u16, value: u8, source: MemoryAccessSource) {
+    fn write_u8_with_source(&mut self, _address: u16, _value: u8, _source: MemoryAccessSource) {
         todo!()
     }
 
@@ -1272,11 +1293,11 @@ impl AudioRegister for FlatMemory {
         todo!()
     }
 
-    fn write_u8(&mut self, address: u8, value: u8) {
+    fn write_u8(&mut self, _address: u8, _value: u8) {
         todo!()
     }
 
-    fn read_u8(&self, address: u8) -> u8 {
+    fn read_u8(&self, _address: u8) -> u8 {
         todo!()
     }
 }

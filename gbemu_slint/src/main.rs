@@ -3,25 +3,20 @@
 #![feature(uint_gather_scatter_bits)]
 #![feature(hash_map_macro)]
 
-use bytes::BytesMut;
 use core::{array, time::Duration};
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     BufferSize,
 };
-use crossbeam::select;
-use dasp::{Frame, Sample, Signal};
+use dasp::{Frame, Signal};
 use etcetera::{AppStrategy, AppStrategyArgs};
 use gbemu_core::{
-    apu,
-    context::{Context, InterruptRegister, Io, Memory, MemoryBus, Serial},
-    cpu,
-    ppu::{self, Mode, Pixel},
+    context::{InterruptRegister, Io, Memory},
+    ppu::Pixel,
     GameBoy, GameBoyButton,
 };
 use indexmap::IndexSet;
 use itertools::Itertools;
-use log::info;
 use ringbuf::traits::Consumer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
@@ -32,17 +27,15 @@ use slint::{
     Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Weak,
 };
 use std::{
-    borrow::Cow,
     collections::VecDeque,
     env,
     error::Error,
-    io::{stdout, Read},
+    io::Read,
     path::PathBuf,
     process::exit,
     rc::Rc,
     thread,
     time::Instant,
-    vec::IntoIter,
 };
 use std::{fs, sync::Arc};
 use std::{
@@ -50,7 +43,6 @@ use std::{
     io::{BufWriter, Write},
 };
 use tap::{Conv, Pipe};
-use tracing::instrument;
 use uzi::using;
 
 use slint_generated::*;
@@ -104,7 +96,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         });
     } // only for #[cfg]
 
-    let mut gameboy: Arc<Mutex<GameBoy>> = Default::default();
+    let gameboy: Arc<Mutex<GameBoy>> = Default::default();
 
     let host = cpal::default_host();
     let device = host
@@ -125,7 +117,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     dbg!(supported_config);
     match supported_config.buffer_size() {
-        cpal::SupportedBufferSize::Range { min, max } => {
+        cpal::SupportedBufferSize::Range { min: _, max: _ } => {
             stream_config.buffer_size = BufferSize::Fixed(1024);
         }
         cpal::SupportedBufferSize::Unknown => todo!(),
@@ -144,7 +136,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         fn create(
             receiver: crossbeam::channel::Receiver<[f64; 8]>,
         ) -> impl Signal<Frame = [f64; 2]> {
-            let signal = Self {
+            
+
+            Self {
                 receiver,
                 blip_bufs: array::from_fn(|_i| {
                     let mut buf = blip_buf::BlipBuf::new(48000 / 5);
@@ -154,9 +148,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 clocks: 0,
                 prev_frame: [0.0; 2],
                 buffer: VecDeque::from([[0.0, 0.0]; 512]),
-            };
-
-            signal
+            }
         }
     }
 
@@ -164,7 +156,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         type Frame = [f64; 2];
 
         fn next(&mut self) -> Self::Frame {
-            let frame = self
+            
+            self
                 .receiver
                 .recv()
                 .map(|frame| {
@@ -173,8 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         (frame[1] + frame[3] + 0.0 + frame[7]) / 4.0,
                     ]
                 })
-                .unwrap();
-            frame
+                .unwrap()
             // while self.buffer.len() < 512 {
             //     for frame in self.receiver.iter() {
             //         let frame = [
@@ -273,7 +265,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let ui_handle = ui.as_weak();
 
     let tile_viewer = TileViewer::new()?;
-    let tile_viewer_handle = tile_viewer.as_weak();
+    let _tile_viewer_handle = tile_viewer.as_weak();
 
     let tilemap_viewer = TileMapViewer::new()?;
 

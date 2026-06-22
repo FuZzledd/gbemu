@@ -4,6 +4,7 @@ use core::{
     iter::Cloned,
     mem,
     ops::{BitAnd, BitOr, Deref, DerefMut, Index, IndexMut, Not, Shl, Shr},
+    range::{Range, RangeIter},
     slice,
 };
 use std::process::Output;
@@ -125,7 +126,18 @@ pub struct LCDRegisters {
     pub(crate) wx: u8,
     start_dma: bool,
     pub(crate) dma_source_address: u8,
-    pub(crate) dma_counter: Option<u8>,
+    pub(crate) dma_counter: DmaStatus,
+    pub(crate) dma_request: Option<u8>,
+}
+
+#[derive(Default, Debug)]
+pub enum DmaStatus {
+    Queued {
+        address: u8,
+    },
+    Running(RangeIter<u8>),
+    #[default]
+    Done,
 }
 
 impl LCDRegisters {
@@ -167,8 +179,7 @@ impl LCDRegisters {
         }
     }
     fn initiate_oam_dma(&mut self, value: u8) {
-        self.dma_source_address = value;
-        self.dma_counter = Some(0);
+        self.dma_request = Some(value);
     }
 }
 

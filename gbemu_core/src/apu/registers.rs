@@ -1,7 +1,6 @@
 use better_default::Default;
 use bitvec::prelude::*;
 use bytemuck::TransparentWrapper;
-use std::ops::{Deref, DerefMut};
 use strum::FromRepr;
 
 #[derive(Default, Debug, TransparentWrapper)]
