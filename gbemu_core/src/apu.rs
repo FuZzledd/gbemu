@@ -1,20 +1,31 @@
-use core::cmp;
+use core::{array, cmp};
+use std::collections::VecDeque;
 
+use crate::context::{Context, Memory};
 use crate::{
     apu::registers::EnvelopeDirection,
     context::{Io, TimerRegister},
 };
-use crate::context::{Context, Memory};
 use better_default::Default;
 use bitvec::prelude::*;
 use blip_buf::BlipBuf;
+use bytes::buf;
 use crossbeam::channel::{self, Receiver, Sender};
-use dasp::Frame;
+use dasp::{Frame, Sample};
+use itertools::{Itertools, izip};
 use tracing::instrument;
 
 pub(crate) mod registers;
 
 type Channel<T> = (Sender<T>, Receiver<T>);
+
+fn create_blip_bufs() -> [BlipBuf; 2] {
+    array::from_fn(|_| {
+        let mut buf = BlipBuf::new(48_000 / 10);
+        buf.set_rates(4.194304E+6, 48_000.0);
+        buf
+    })
+}
 
 #[derive(Default)]
 pub struct APU {
@@ -30,8 +41,12 @@ pub struct APU {
 
     clocks: u32,
 
-    #[default(channel::unbounded())]
-    pub output_channel: Channel<[f64; 8]>,
+    #[default(create_blip_bufs())]
+    blip_bufs: [BlipBuf; 2],
+    prev_frame: [i16; 2],
+
+    #[default(channel::bounded(512))]
+    pub output_channel: Channel<VecDeque<[i16; 2]>>,
 }
 
 impl APU {
@@ -61,45 +76,67 @@ impl APU {
         let audio_panning = ctx.memory.io().audio().nr51();
 
         let frame = [
-            if audio_panning.channel_1_left() {
-                channel1_out
-            } else {
-                0.0
-            },
-            if audio_panning.channel_1_right() {
-                channel1_out
-            } else {
-                0.0
-            },
-            if audio_panning.channel_2_left() {
-                channel2_out
-            } else {
-                0.0
-            },
-            if audio_panning.channel_2_right() {
-                channel2_out
-            } else {
-                0.0
-            },
-            if audio_panning.channel_3_left() {
-                channel3_out
-            } else {
-                0.0
-            },
-            if audio_panning.channel_3_right() {
-                channel3_out
-            } else {
-                0.0
-            },
-            0.0,
-            0.0,
+            [
+                if audio_panning.channel_1_left() {
+                    channel1_out
+                } else {
+                    0.0
+                },
+                if audio_panning.channel_1_right() {
+                    channel1_out
+                } else {
+                    0.0
+                },
+            ],
+            [
+                if audio_panning.channel_2_left() {
+                    channel2_out
+                } else {
+                    0.0
+                },
+                if audio_panning.channel_2_right() {
+                    channel2_out
+                } else {
+                    0.0
+                },
+            ],
+            [
+                if audio_panning.channel_3_left() {
+                    channel3_out
+                } else {
+                    0.0
+                },
+                if audio_panning.channel_3_right() {
+                    channel3_out
+                } else {
+                    0.0
+                },
+            ],
+            [0.0, 0.0],
         ]
-        .mul_amp(bytemuck::cast::<_, [f64; 8]>(
-            [[left_volume, right_volume]; 4],
-        ));
+        .into_iter()
+        .fold([0.0, 0.0], |acc, input| acc.add_amp(input))
+        .mul_amp([left_volume / 4.0, right_volume / 4.0])
+        .map(|sample| sample.to_sample::<i16>());
+
+        for (buf, sample, prev) in izip!(self.blip_bufs.iter_mut(), frame, self.prev_frame) {
+            buf.add_delta(self.clocks, sample as i32 - prev as i32);
+        }
+
+        self.prev_frame = frame;
 
         if self.clocks == 0 {
-            let _ = self.output_channel.0.try_send(frame);
+            for buf in self.blip_bufs.iter_mut() {
+                buf.end_frame(buf.clocks_needed(512));
+            }
+            let (mut buf_l, mut buf_r) = ([0; 512], [0; 512]);
+            while self.blip_bufs[0].samples_avail() > 0 {
+                self.blip_bufs[0].read_samples(&mut buf_l, false);
+                self.blip_bufs[1].read_samples(&mut buf_r, false);
+
+                let output_buffer = izip!(buf_l, buf_r).map(|(l, r)| [l, r]).collect();
+                let _ = self.output_channel.0.send(output_buffer);
+            }
         }
 
         let audio_control = ctx.memory.io_mut().audio_mut().nr52_mut();
@@ -108,7 +145,7 @@ impl APU {
         audio_control.set_channel_2_enabled(self.channel3.enable);
 
         self.cycle_counter = self.cycle_counter.wrapping_add(1);
-        self.clocks = (self.clocks + 1) % 88;
+        self.clocks = (self.clocks + 1) % self.blip_bufs[0].clocks_needed(512);
     }
 }
 
@@ -145,14 +182,6 @@ struct Channel1 {
 
     enable: bool,
     volume: u8,
-    prev_output: i32,
-
-    #[default({
-        let mut buf = BlipBuf::new(48000 / 10);
-        buf.set_rates(4.194304E+6, 48000.0);
-        buf
-    })]
-    buffer: BlipBuf,
 
     capacitor: f64,
 }
@@ -330,14 +359,7 @@ struct Channel2 {
 
     enable: bool,
     volume: u8,
-    prev_output: i32,
 
-    #[default({
-        let mut buf = BlipBuf::new(48000 / 10);
-        buf.set_rates(4.194304E+6, 48000.0);
-        buf
-    })]
-    buffer: BlipBuf,
     capacitor: f64,
 }
 

@@ -27,15 +27,8 @@ use slint::{
     Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Weak,
 };
 use std::{
-    collections::VecDeque,
-    env,
-    error::Error,
-    io::Read,
-    path::PathBuf,
-    process::exit,
-    rc::Rc,
-    thread,
-    time::Instant,
+    collections::VecDeque, env, error::Error, io::Read, path::PathBuf, process::exit, rc::Rc,
+    thread, time::Instant,
 };
 use std::{fs, sync::Arc};
 use std::{
@@ -125,109 +118,43 @@ fn main() -> Result<(), Box<dyn Error>> {
     stream_config.sample_rate = 48_000;
 
     struct GBSignal {
-        receiver: crossbeam::channel::Receiver<[f64; 8]>,
-        blip_bufs: [blip_buf::BlipBuf; 2],
-        clocks: u32,
-        prev_frame: [f64; 2],
-        buffer: VecDeque<[f64; 2]>,
+        receiver: crossbeam::channel::Receiver<VecDeque<[i16; 2]>>,
+        buffer: VecDeque<[i16; 2]>,
     }
 
     impl GBSignal {
         fn create(
-            receiver: crossbeam::channel::Receiver<[f64; 8]>,
-        ) -> impl Signal<Frame = [f64; 2]> {
-            
-
+            receiver: crossbeam::channel::Receiver<VecDeque<[i16; 2]>>,
+        ) -> impl Signal<Frame = [i16; 2]> {
             Self {
                 receiver,
-                blip_bufs: array::from_fn(|_i| {
-                    let mut buf = blip_buf::BlipBuf::new(48000 / 5);
-                    buf.set_rates(48000f64, 48_000f64);
-                    buf
-                }),
-                clocks: 0,
-                prev_frame: [0.0; 2],
-                buffer: VecDeque::from([[0.0, 0.0]; 512]),
+                buffer: VecDeque::from([[0, 0]; 512]),
             }
         }
     }
 
     impl Signal for GBSignal {
-        type Frame = [f64; 2];
+        type Frame = [i16; 2];
 
         fn next(&mut self) -> Self::Frame {
-            
-            self
-                .receiver
-                .recv()
-                .map(|frame| {
-                    [
-                        (frame[0] + frame[2] + 0.0 + frame[6]) / 4.0,
-                        (frame[1] + frame[3] + 0.0 + frame[7]) / 4.0,
-                    ]
-                })
-                .unwrap()
-            // while self.buffer.len() < 512 {
-            //     for frame in self.receiver.iter() {
-            //         let frame = [
-            //             (frame[0] + frame[2] + frame[4] + frame[6]) / 4.0,
-            //             (frame[1] + frame[3] + frame[5] + frame[7]) / 4.0,
-            //         ];
-
-            //         let delta: [i16; 2] = [
-            //             frame[0].to_sample::<i16>() - self.prev_frame[0].to_sample::<i16>(),
-            //             frame[1].to_sample::<i16>() - self.prev_frame[1].to_sample::<i16>(),
-            //         ];
-            //         self.blip_bufs[0].add_delta(self.clocks, delta[0] as i32);
-            //         self.blip_bufs[1].add_delta(self.clocks, delta[1] as i32);
-            //         self.prev_frame = frame;
-            //         self.clocks += 1;
-            //         if self.clocks > 2048 {
-            //             self.blip_bufs[0].end_frame(self.clocks);
-            //             self.blip_bufs[1].end_frame(self.clocks);
-            //             self.clocks = 0;
-            //             break;
-            //         }
-            //     }
-
-            //     while self.blip_bufs[0].samples_avail() >= 512 {
-            //         assert!(self.blip_bufs[1].samples_avail() >= 512);
-            //         let mut bufs = [[0; 512]; 2];
-            //         self.blip_bufs[0].read_samples(&mut bufs[0], false);
-            //         self.blip_bufs[1].read_samples(&mut bufs[1], false);
-            //         self.buffer.extend(
-            //             bufs[0]
-            //                 .into_iter()
-            //                 .zip(bufs[1])
-            //                 .map(|(l, r)| [l.to_sample(), r.to_sample()]),
-            //         );
-            //     }
-            // }
-            // self.buffer.pop_front().unwrap()
+            if self.buffer.len() < 4096 {
+                for buf in self.receiver.try_iter() {
+                    self.buffer.extend(buf);
+                }
+            }
+            self.buffer.pop_front().unwrap_or_default()
         }
     }
 
-    let mut signal = GBSignal::create(gameboy.lock().apu.output_channel.1.clone())
-        .buffered(dasp::ring_buffer::Bounded::from([[0.0; 2]; 512]))
-        .delay(100);
+    let mut signal =
+        GBSignal::create(gameboy.lock().apu.output_channel.1.clone()).into_interleaved_samples();
 
     let stream = device
         .build_output_stream(
             stream_config,
-            using!([], move |data: &mut [f64], _: &cpal::OutputCallbackInfo| {
-                // let mut iter = data.iter_mut();
-                // while let Some(sample) = iter.next() {
-                //     let channel1_sample = channel1_stream.next().unwrap().to_float_sample();
-                //     let channel2_sample = channel2_stream.next().unwrap().to_float_sample();
-                //     let channel3_sample = channel3_stream.next().unwrap().to_float_sample();
-
-                //     let output = (channel1_sample + channel2_sample + channel3_sample) / 3.0;
-                //     *sample = output;
-                //     *iter.next().unwrap() = output;
-                // }
-
+            using!([], move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                 for sample in data.iter_mut() {
-                    *sample = signal.by_ref().into_interleaved_samples().next_sample();
+                    *sample = signal.next_sample();
                 }
             }),
             move |err| {
