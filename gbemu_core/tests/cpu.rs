@@ -61,8 +61,7 @@ fn test_opcode(_path: &Utf8Path, content: String) -> datatest_stable::Result<()>
 
     let test_data: OpcodeTests = serde_json::from_str(&content)?;
 
-    for (index, opcode_test) in test_data.into_iter().enumerate() {
-        println!("\nTest {index}");
+    for (_index, opcode_test) in test_data.into_iter().enumerate() {
         let mut cpu = CPU::<FlatMemory>::default();
         let mut context = Context::<FlatMemory>::default();
         let OpcodeTest {

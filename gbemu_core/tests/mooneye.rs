@@ -9,13 +9,13 @@ datatest_stable::harness! {
 
 }
 
-fn test_emulator_only(_path: &Utf8Path, rom: Vec<u8>) -> datatest_stable::Result<()> {
-    test_acceptance(_path, rom)
+fn test_emulator_only(path: &Utf8Path, rom: Vec<u8>) -> datatest_stable::Result<()> {
+    test_acceptance(path, rom)
 }
 
-fn test_acceptance(_path: &Utf8Path, rom: Vec<u8>) -> datatest_stable::Result<()> {
+fn test_acceptance(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()> {
     let mut gameboy: GameBoy = GameBoy::default();
-    gameboy.cpu.load_rom(&rom, &mut gameboy.context);
+    gameboy.load_rom(path);
 
     let status = loop {
         loop {
@@ -58,7 +58,8 @@ fn test_acceptance(_path: &Utf8Path, rom: Vec<u8>) -> datatest_stable::Result<()
         }
     }
 
-    let image = common::inline_iterm2_image_from_buffer(gameboy.buffer.clone());
+    let image =
+        common::inline_iterm2_image_from_buffer(gameboy.buffer.clone(), path.file_name().unwrap());
 
     println!("Result\n {image}");
 

@@ -5,6 +5,7 @@ import {
     CheckBox,
     GroupBox,
     Slider,
+    RadioGroup,
 } from "std-widgets.slint";
 
 export struct Tile {
@@ -19,16 +20,13 @@ export component TileMapViewer inherits Window {
     in-out property <TileMap> selected_map: Background;
     in-out property <{ x: float, y: float }> scroll;
 
-    min-width: 400px;
-    min-height: 400px;
+    min-width: 500px;
+    min-height: 500px;
     title: @tr("Tile Map Viewer");
     in-out property <[Tile]> tiles;
-    // max-height: 1px / 0.0000000001;
-    // max-width: 1px / 0.00000000001;
-    changed selected_map => {
-        checkbox1.checked = selected_map == TileMap.Background;
-        checkbox2.checked = selected_map == TileMap.Window;
-    }
+
+    DropArea { }
+
     HorizontalLayout {
         alignment: LayoutAlignment.stretch;
         VerticalBox {
@@ -36,23 +34,22 @@ export component TileMapViewer inherits Window {
             alignment: LayoutAlignment.start;
             horizontal-stretch: 0.1;
             GroupBox {
-                title: @tr("Selected Map:");
-                VerticalBox {
-                    checkbox1 := CheckBox {
+                RadioGroup {
+                    title: @tr("Selected Map:");
+
+                    RadioButton {
+                        text: "Background";
                         checked: selected_map == TileMap.Background;
-                        text: @tr("Background");
                         toggled => {
-                            selected_map = TileMap.Background;
-                            self.checked = true;
+                            if self.checked { selected_map = TileMap.Background }
                         }
                     }
 
-                    checkbox2 := CheckBox {
+                    RadioButton {
+                        text: "Window";
                         checked: selected_map == TileMap.Window;
-                        text: @tr("Window");
                         toggled => {
-                            selected_map = TileMap.Window;
-                            self.checked = true;
+                            if self.checked { selected_map = TileMap.Window }
                         }
                     }
                 }
@@ -62,10 +59,9 @@ export component TileMapViewer inherits Window {
         Rectangle {
             clip: false;
             height: 100%;
-            max-width: 1px / 0;
             horizontal-stretch: 1;
             Rectangle {
-                background: magenta;
+                background: black;
                 clip: true;
                 height: max(floor(min(parent.width, parent.height) / 256px), 1.0) * 256px;
                 width: max(floor(min(parent.width, parent.height) / 256px), 1.0) * 256px;

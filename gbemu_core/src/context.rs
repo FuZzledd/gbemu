@@ -1,19 +1,23 @@
-use core::{
-    cell::Cell,
-    range::Range,
-};
+use core::{cell::Cell, range::Range};
 use std::{
-    io::Write,
+    ffi::OsString,
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf},
     time::Instant,
 };
 
 use better_default::Default;
 use bitvec::{access::BitSafe, prelude::*};
-use bytemuck::TransparentWrapper;
+use bytemuck::{NoUninit, Pod, TransparentWrapper, from_bytes};
+use rgb::Zeroable;
 use ringbuf::{StaticRb, traits::RingBuffer};
 use spire_enum::prelude::{delegate_impl, delegated_enum};
 use strum::FromRepr;
-use tracing::{debug, info};
+use tap::Pipe;
+use time::UtcDateTime;
+use tracing::{debug, info, warn};
+use unarc_rs::unified::ArchiveFormat::Arc;
 
 use crate::{
     apu::{AudioRegister, AudioRegisters},
@@ -393,6 +397,17 @@ pub enum MemoryBankController {
 impl MemoryBankController {
     pub fn read_u8(&self, address: u16) -> u8;
     pub fn write_u8(&mut self, address: u16, value: u8);
+    pub fn load_save(&mut self, save_file: impl AsRef<[u8]>);
+}
+
+impl MemoryBankController {
+    pub fn dump_save(&mut self) -> Option<Vec<u8>> {
+        delegate_memory_bank_controller! {
+            self.dump_save().map(|data| {
+                data.as_ref().to_vec()
+            })
+        }
+    }
 }
 
 trait Mapper {
@@ -401,6 +416,12 @@ trait Mapper {
     fn write_u8(&mut self, address: u16, value: u8);
 
     fn new(rom: &[u8]) -> Self;
+
+    fn dump_save(&mut self) -> Option<impl AsRef<[u8]>> {
+        None as Option<&[u8]>
+    }
+
+    fn load_save(&mut self, _save_file: impl AsRef<[u8]>) {}
 }
 
 #[derive(Default)]
@@ -426,7 +447,7 @@ impl Mapper for Mbc0 {
     fn write_u8(&mut self, address: u16, value: u8) {
         match address {
             0x0000..=0x3FFF => {
-                println!(
+                warn!(
                     "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
                 );
                 // let _ = PLAYBACK_CONTROLLER.0.send(false);
@@ -434,7 +455,7 @@ impl Mapper for Mbc0 {
             0x4000..=0x7FFF => {
                 // TODO: switchable rom banks
                 //self.rom_banks[0][address as usize - 0x4000] = value
-                println!(
+                warn!(
                     "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
                 );
                 // let _ = PLAYBACK_CONTROLLER.0.send(false);
@@ -554,6 +575,14 @@ impl Mapper for Mbc1 {
             ..Default::default()
         }
     }
+
+    fn dump_save(&mut self) -> Option<impl AsRef<[u8]>> {
+        Some(self.ram_banks.concat())
+    }
+
+    fn load_save(&mut self, save_file: impl AsRef<[u8]>) {
+        self.ram_banks = save_file.as_ref().as_chunks::<{ 1024 * 8 }>().0.to_vec();
+    }
 }
 
 #[derive(Default)]
@@ -579,8 +608,8 @@ pub struct Mbc3 {
     pub hours_latched: u64,
     pub days_latched: u64,
 
-    #[default(Instant::now().into())]
-    pub time_last_accessed: Cell<Instant>,
+    #[default(UtcDateTime::now().into())]
+    pub time_last_accessed: Cell<UtcDateTime>,
 
     pub day_overflow: Cell<bool>,
     pub day_overflow_latched: bool,
@@ -617,7 +646,7 @@ impl Mapper for Mbc3 {
                                     0x0A => self.hours_latched,
                                     0x0B => self.days_latched & 0b1111_1111,
                                     0x0C => {
-                                        self.days_latched & (1 << 8)
+                                        (self.days_latched >> 8) & 0b1
                                             | ((self.timer_halt as u64) << 6)
                                             | ((self.day_overflow_latched as u64) << 7)
                                     }
@@ -630,7 +659,7 @@ impl Mapper for Mbc3 {
                                     0x0A => self.hours_set.get(),
                                     0x0B => self.days_set.get() & 0b1111_1111,
                                     0x0C => {
-                                        self.days_set.get() & (1 << 8)
+                                        (self.days_set.get() >> 8) & 0b1
                                             | ((self.timer_halt as u64) << 6)
                                             | ((self.day_overflow.get() as u64) << 7)
                                     }
@@ -735,25 +764,87 @@ impl Mapper for Mbc3 {
             ..Default::default()
         }
     }
+
+    fn load_save(&mut self, save_file: impl AsRef<[u8]>) {
+        let bytes = save_file.as_ref();
+        let (ram, rest) = bytes.as_chunks::<{ 1024 * 8 }>();
+
+        self.ram_banks = ram.to_vec();
+        let rtc_data = if rest.len() == 44 {
+            let rtc_data: &RtcData<u32> = from_bytes(rest);
+            RtcData {
+                time_days: rtc_data.time_days,
+                time_days_high: rtc_data.time_days_high,
+                timestamp: rtc_data.timestamp as u64,
+                time_seconds: rtc_data.time_seconds,
+                time_minutes: rtc_data.time_minutes,
+                time_hours: rtc_data.time_hours,
+                latched_time_seconds: rtc_data.latched_time_seconds,
+                latched_time_minutes: rtc_data.latched_time_minutes,
+                latched_time_hours: rtc_data.latched_time_hours,
+                latched_time_days: rtc_data.latched_time_days,
+                latched_time_days_high: rtc_data.latched_time_days_high,
+            }
+        } else {
+            *from_bytes(rest)
+        };
+
+        self.seconds_set.set(rtc_data.time_seconds as u64);
+        self.minutes_set.set(rtc_data.time_minutes as u64);
+        self.hours_set.set(rtc_data.time_hours as u64);
+        self.days_set
+            .set((rtc_data.time_days | (rtc_data.time_days_high & 0b1) << 8) as u64);
+        self.day_overflow
+            .set(rtc_data.time_days_high & (1 << 7) != 0);
+
+        self.timer_halt = rtc_data.time_days_high & (1 << 6) != 0;
+
+        self.seconds_latched = rtc_data.latched_time_seconds as u64;
+        self.minutes_latched = rtc_data.latched_time_minutes as u64;
+        self.hours_latched = rtc_data.latched_time_hours as u64;
+        self.days_latched =
+            (rtc_data.latched_time_days | (rtc_data.latched_time_days_high & 0b1) << 8) as u64;
+        self.day_overflow_latched = rtc_data.latched_time_days_high & (1 << 7) != 0;
+    }
+
+    fn dump_save(&mut self) -> Option<impl AsRef<[u8]>> {
+        self.update_time();
+        let mut save = self.ram_banks.concat();
+        save.extend_from_slice(bytemuck::bytes_of(&self.rtc_time_stamp()));
+        Some(save)
+    }
 }
 
 impl Mbc3 {
     fn update_time(&self) {
         if !self.timer_halt {
             self.seconds_set.update(|seconds| {
-                seconds.wrapping_add(self.time_last_accessed.get().elapsed().as_secs()) % 60
+                seconds.wrapping_add(
+                    (UtcDateTime::now() - self.time_last_accessed.get())
+                        .whole_seconds()
+                        .unsigned_abs(),
+                ) % 60
             });
             self.minutes_set.update(|minutes| {
-                minutes.wrapping_add(self.time_last_accessed.get().elapsed().as_secs() / 60) % 60
+                minutes.wrapping_add(
+                    (UtcDateTime::now() - self.time_last_accessed.get())
+                        .whole_minutes()
+                        .unsigned_abs(),
+                ) % 60
             });
             self.hours_set.update(|hours| {
-                hours.wrapping_add(self.time_last_accessed.get().elapsed().as_secs() / (60 * 60))
-                    % 24
+                hours.wrapping_add(
+                    (UtcDateTime::now() - self.time_last_accessed.get())
+                        .whole_hours()
+                        .unsigned_abs(),
+                ) % 24
             });
 
             self.days_set.update(|days| {
                 let days_set = days.wrapping_add(
-                    self.time_last_accessed.get().elapsed().as_secs() / (60 * 60 * 24),
+                    (UtcDateTime::now() - self.time_last_accessed.get())
+                        .whole_days()
+                        .unsigned_abs(),
                 );
                 if days_set >= 512 {
                     self.day_overflow.set(true);
@@ -762,8 +853,48 @@ impl Mbc3 {
             });
         }
 
-        self.time_last_accessed.set(Instant::now());
+        self.time_last_accessed.set(UtcDateTime::now());
     }
+
+    fn rtc_time_stamp(&self) -> RtcData<u64> {
+        RtcData {
+            time_seconds: self.seconds_set.get() as u32,
+            time_minutes: self.minutes_set.get() as u32,
+            time_hours: self.hours_set.get() as u32,
+            time_days: self.days_set.get() as u32 & 0b1111_1111,
+            time_days_high: ((self.days_set.get() >> 8) & 0b1
+                | ((self.timer_halt as u64) << 6)
+                | ((self.day_overflow.get() as u64) << 7)) as u32,
+            latched_time_seconds: self.seconds_latched as u32,
+            latched_time_minutes: self.minutes_latched as u32,
+            latched_time_hours: self.hours_latched as u32,
+            latched_time_days: self.days_latched as u32 & 0b1111_1111,
+            latched_time_days_high: ((self.days_latched >> 8) & 0b1
+                | ((self.timer_halt as u64) << 6)
+                | ((self.day_overflow_latched as u64) << 7))
+                as u32,
+            timestamp: self.time_last_accessed.get().unix_timestamp() as u64,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+#[repr(C, packed)]
+struct RtcData<T>
+where
+    T: Default,
+{
+    time_seconds: u32,
+    time_minutes: u32,
+    time_hours: u32,
+    time_days: u32,
+    time_days_high: u32,
+    latched_time_seconds: u32,
+    latched_time_minutes: u32,
+    latched_time_hours: u32,
+    latched_time_days: u32,
+    latched_time_days_high: u32,
+    timestamp: T,
 }
 
 #[derive(Default)]
@@ -784,8 +915,106 @@ pub struct MemoryBus {
 impl MemoryBus {}
 
 #[derive(Default)]
-pub struct Context<M: Memory + Default> {
+pub struct Context<M: Memory + Default = MemoryBus> {
     pub memory: M,
+    pub rom_info: Option<RomInfo>,
+}
+
+impl Context<MemoryBus> {
+    pub fn load_rom(&mut self, path: impl AsRef<Path>) {
+        let rom = if let Some(rom) = unarc_rs::unified::ArchiveFormat::open_path(&path)
+            .ok()
+            .and_then(|mut archive| {
+                archive.set_single_file_name(
+                    path.as_ref()
+                        .file_prefix()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                );
+                archive
+                    .entries_iter()
+                    .map(Result::unwrap)
+                    .find(|entry| {
+                        entry.file_name().to_lowercase().pipe(|file_name| {
+                            file_name.ends_with(".gb") || file_name.ends_with(".gbc")
+                        })
+                    })
+                    .map(|rom_entry| archive.read(&rom_entry).unwrap())
+            }) {
+            rom
+        } else if let Some(rom) = png_achunk::Decoder::from_file(&path)
+            .ok()
+            .and_then(|mut decoder| decoder.decode_ancillary_chunks().ok())
+            .and_then(|chunks| {
+                chunks
+                    .into_iter()
+                    .find(|chunk| chunk.chunk_type.to_ascii() == "gbRM")
+                    .map(|chunk| chunk.data)
+            })
+        {
+            rom
+        } else {
+            //Not an archive, just read as a plain ROM file
+            fs::read(&path).unwrap()
+        };
+
+        let rom_info = RomInfo::new(&rom, path, self);
+        self.memory.load_rom(rom);
+
+        if let Ok(save_file) = fs::read(&rom_info.save_path) {
+            self.memory.mapper.load_save(save_file);
+        }
+        self.rom_info = Some(rom_info);
+    }
+
+    pub fn save(&mut self) -> io::Result<()> {
+        if let Some(save) = self.memory.mapper.dump_save() {
+            fs::write(&self.rom_info.as_ref().unwrap().save_path, save)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RomInfo {
+    title: String,
+    save_path: PathBuf,
+    file_name: OsString,
+    header_checksum: u8,
+    global_checksum: u16,
+    data: Vec<u8>,
+}
+
+impl RomInfo {
+    fn new(data: impl AsRef<[u8]>, path: impl AsRef<Path>, _context: &Context) -> Self {
+        let data = data.as_ref();
+        let path = path.as_ref();
+
+        let title = str::from_utf8(&data[0x134..=0x143])
+            .unwrap()
+            .trim_end_matches('\0')
+            .to_string();
+
+        let file_name = path.file_prefix().unwrap().to_os_string();
+
+        let header_checksum = data[0x014D];
+
+        let global_checksum = u16::from_be_bytes(data[0x014E..=0x014F].try_into().unwrap());
+
+        //TODO: Query settings for save path
+        let save_path = path.with_extension("sav");
+
+        RomInfo {
+            title,
+            save_path,
+            file_name,
+            header_checksum,
+            global_checksum,
+            data: data.to_vec(),
+        }
+    }
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -814,7 +1043,7 @@ pub trait Memory {
     fn ie_mut(&mut self) -> &mut u8;
 
     fn load_boot_rom(&mut self, rom: &[u8]);
-    fn load_rom(&mut self, rom: &[u8]);
+    fn load_rom(&mut self, rom: impl AsRef<[u8]>);
 
     fn tick_oam_dma(&mut self);
 }
@@ -914,7 +1143,8 @@ impl Memory for MemoryBus {
         // self.rom[..rom.len()].copy_from_slice(rom);
     }
 
-    fn load_rom(&mut self, rom: &[u8]) {
+    fn load_rom(&mut self, rom: impl AsRef<[u8]>) {
+        let rom = rom.as_ref();
         self.mapper = match rom[0x147] {
             0x00 => Mbc0::new(rom).into(),
             0x01..=0x03 => Mbc1::new(rom).into(),
@@ -1070,7 +1300,7 @@ impl Memory for FlatMemory {
         todo!()
     }
 
-    fn load_rom(&mut self, _rom: &[u8]) {
+    fn load_rom(&mut self, _rom: impl AsRef<[u8]>) {
         todo!()
     }
 

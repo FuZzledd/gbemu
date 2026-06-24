@@ -169,13 +169,6 @@ impl<T: Memory + Default> CPU<T> {
         ctx.memory.load_boot_rom(rom);
     }
 
-    pub fn load_rom(&mut self, rom: &[u8], ctx: &mut Context<MemoryBus>) {
-        *self = Default::default();
-        ctx.memory = Default::default();
-        self.load_debug_initial_state(ctx);
-        ctx.memory.load_rom(rom);
-    }
-
     pub fn load_debug_initial_state(&mut self, ctx: &mut Context<MemoryBus>) {
         self.registers.a = 0x01;
         *self.registers.f = 0xB0;
@@ -197,24 +190,24 @@ impl<T: Memory + Default> CPU<T> {
         io.lcd.dma = 0xFF;
         io.lcd.bgp = 0xFC;
         io.lcd.obp = [0xFF; 2];
-        io.audio.nr10.0 = 0x80;
-        io.audio.nr11.0 = 0xBF;
-        io.audio.nr12.0 = 0xF3;
-        io.audio.nr13_14.0 = 0xBF_FF;
-        io.audio.nr21.0 = 0x3F;
-        io.audio.nr22.0 = 0x00;
-        io.audio.nr23_24.0 = 0xBF_FF;
+        io.audio.nr10 = 0x80.into();
+        io.audio.nr11 = 0xBF.into();
+        io.audio.nr12 = 0xF3.into();
+        io.audio.nr13_14 = 0xBF_FF.into();
+        io.audio.nr21 = 0x3F.into();
+        io.audio.nr22 = 0x00.into();
+        io.audio.nr23_24 = 0xBF_FF.into();
         io.audio.nr30.0 = 0x7F;
         io.audio.nr31.0 = 0xFF;
         io.audio.nr32.0 = 0x9F;
-        io.audio.nr33_34.0 = 0xBF_FF;
+        io.audio.nr33_34 = 0xBF_FF.into();
         io.audio.nr41.0 = 0xFF;
-        io.audio.nr42.0 = 0x00;
+        io.audio.nr42 = 0x00.into();
         io.audio.nr43.0 = 0x00;
         io.audio.nr44.0 = 0xBF;
-        io.audio.nr50.0 = 0x77;
-        io.audio.nr51.0 = 0xF3;
-        io.audio.nr52.0 = 0xF1;
+        io.audio.nr50 = 0x77.into();
+        io.audio.nr51 = 0xF3.into();
+        io.audio.nr52 = 0xF1.into();
     }
 
     pub fn dump_state(&mut self, ctx: &mut Context<T>) -> String {
@@ -575,11 +568,6 @@ impl<T: Memory + Default> CPU<T> {
                     0o7 => R8(A),
                     _ => unreachable!(),
                 };
-
-                if matches!((destination, source), (R8(B), R8(B))) {
-                    println!("Breakpoint hit");
-                    println!("{}", self.dump_state(ctx));
-                }
 
                 self.state = State::Execute(Operation::Load(destination, source), 0);
             }

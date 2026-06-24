@@ -2,10 +2,7 @@
 #![feature(hash_map_macro)]
 
 use core::ops::{BitAnd, BitOr, Not, Shl, Shr};
-use std::{
-    collections::HashMap,
-    sync::LazyLock,
-};
+use std::{collections::HashMap, path::Path, sync::LazyLock};
 
 use bytes::BytesMut;
 use crossbeam::channel::{Receiver, Sender};
@@ -14,8 +11,10 @@ use tap::Conv;
 use tracing::instrument;
 
 use crate::{
+    apu::APU,
     context::{Context, InterruptRegister, InterruptType::Joypad, Memory, MemoryBus, Serial},
-    ppu::{Mode, Pixel},
+    cpu::CPU,
+    ppu::{Mode, PPU, Pixel},
 };
 
 use std::hash_map;
@@ -153,6 +152,14 @@ impl GameBoy {
         {
             self.context.memory.io.interrupt.schedule_interrupt(Joypad);
         }
+    }
+
+    pub fn load_rom(&mut self, path: impl AsRef<Path>) {
+        self.cpu = CPU::default();
+        self.context = Context::default();
+
+        self.cpu.load_debug_initial_state(&mut self.context);
+        self.context.load_rom(path);
     }
 }
 

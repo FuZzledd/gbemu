@@ -8,6 +8,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     BufferSize,
 };
+
 use dasp::{Frame, Signal};
 use etcetera::{AppStrategy, AppStrategyArgs};
 use gbemu_core::{
@@ -15,8 +16,10 @@ use gbemu_core::{
     ppu::Pixel,
     GameBoy, GameBoyButton,
 };
+use image24::ImageEncoder;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use png_achunk::{Chunk, ChunkType};
 use ringbuf::traits::Consumer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
@@ -27,8 +30,16 @@ use slint::{
     Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Weak,
 };
 use std::{
-    collections::VecDeque, env, error::Error, io::Read, path::PathBuf, process::exit, rc::Rc,
-    thread, time::Instant,
+    collections::VecDeque,
+    env,
+    error::Error,
+    fs::File,
+    io::{BufReader, Read},
+    path::{Path, PathBuf},
+    process::exit,
+    rc::Rc,
+    thread,
+    time::Instant,
 };
 use std::{fs, sync::Arc};
 use std::{
@@ -210,10 +221,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             CloseRequestResponse::HideWindow
         }));
 
-    ui.window().on_close_requested(|| {
+    ui.window().on_close_requested(using!([gameboy], move || {
+        gameboy
+            .lock()
+            .context
+            .save()
+            .unwrap_or_else(|e| tracing::error!("{}", e));
+
         quit_event_loop().unwrap();
         CloseRequestResponse::KeepWindowShown
-    });
+    }));
 
     ui.on_toggle_tile_viewer(using!([ui_handle, tile_viewer.as_weak()], move || {
         let tile_viewer_shown = ui_handle.upgrade().unwrap().get_tile_viewer_shown();
@@ -235,10 +252,70 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }));
 
+    ui.on_embed_rom(using!([ui_handle], move || {
+        let Some(source_image_path) = rfd::FileDialog::new()
+            .add_filter("Images (.png)", &["png"])
+            .pick_file()
+        else {
+            return;
+        };
+
+        let (image, chunks) = png_achunk::Decoder::from_file(source_image_path)
+            .map(|mut decoder| decoder.decode_all().expect("Couldn't load image"))
+            .expect("Couldn't load image");
+
+        let Some(source_rom_path) = rfd::FileDialog::new()
+            .add_filter("Game Boy ROMs (.gb/.gbc)", &["gb", "gbc"])
+            .set_title("Select source ROM")
+            .pick_file()
+        else {
+            return;
+        };
+        let rom = fs::read(source_rom_path).expect("Couldn't load ROM");
+
+        let Some(save_path) = rfd::FileDialog::new()
+            .add_filter("Destination image (.png)", &["png"])
+            .save_file()
+        else {
+            return;
+        };
+
+        let mut encoder = png_achunk::Encoder::new_to_file(save_path)
+            .expect("Couldn't create new file")
+            .with_custom_chunk(Chunk::new(ChunkType::from_ascii(&"gbRM").unwrap(), rom).unwrap());
+
+        for chunk in chunks {
+            encoder = encoder.with_custom_chunk(chunk);
+        }
+
+        image
+            .write_with_encoder(encoder)
+            .expect("Couldn't write image file");
+    }));
+
     let (playback_controller, playback_receiver) = crossbeam::channel::bounded::<bool>(10);
+
+    let (redraw_sender, redraw_receiver) = crossbeam::channel::bounded::<()>(1);
 
     thread::spawn(using!(
         [
+            gameboy,
+            ui.as_weak(),
+            tile_viewer.as_weak(),
+            tilemap_viewer.as_weak()
+        ],
+        move || {
+            loop {
+                if redraw_receiver.recv().is_ok() {
+                    redraw(&gameboy, &ui, &tile_viewer, &tilemap_viewer);
+                }
+            }
+        }
+    ));
+
+    thread::spawn(using!(
+        [
+            redraw_sender,
             ui_handle,
             gameboy,
             tile_viewer.as_weak(),
@@ -258,12 +335,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     let target_time = Instant::now() + Duration::from_secs_f64(1.0 / 59.73);
                     loop {
-                        let mut gameboy = gameboy.lock();
-                        let redraw_request = gameboy.tick(false);
+                        let redraw_request = gameboy.lock().tick(false);
                         if redraw_request {
-                            redraw(&gameboy, &ui_handle, &tile_viewer, &tilemap_viewer);
                             let delta_time =
                                 prev_frame_time.elapsed().as_secs_f32().max(1.0 / 59.73);
+                            redraw_sender.send(()).unwrap();
                             ui_handle
                                 .upgrade_in_event_loop(move |handle| {
                                     handle.set_fps(1.0 / delta_time);
@@ -272,7 +348,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             prev_frame_time = Instant::now();
                             break;
                         }
-                        for byte in gameboy.context.memory.io.serial.output.pop_iter() {
+                        for byte in gameboy.lock().context.memory.io.serial.output.pop_iter() {
                             println!("0x{byte:02X}");
                         }
                     }
@@ -295,7 +371,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         ],
         move || {
             let Some(rom_path) = rfd::FileDialog::new()
-                .add_filter("GameBoy ROMs", &["gb"])
+                .add_filter("GameBoy ROMs (.gb/.gbc)", &["gb"])
+                .add_filter(
+                    "Archives (.zip/.tar.gz/.rar/etc.)",
+                    &["zip", "gz", "tar", "rar", "zst", "xz"],
+                )
+                .add_filter("ROM Embedded Images (.png)", &["png"])
                 .set_directory(
                     env::current_dir()
                         .unwrap_or_else(|_| env::home_dir().unwrap_or_else(|| PathBuf::from("/"))),
@@ -304,12 +385,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             else {
                 return;
             };
+
             let gameboy = &mut *gameboy.lock();
-
-            gameboy.cpu.load_debug_initial_state(&mut gameboy.context);
-
-            let rom = fs::read(rom_path.clone()).unwrap();
-
             {
                 let mut recent = recent.write();
                 recent.shift_insert(0, rom_path.clone());
@@ -328,11 +405,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .write_all(&serde_json::to_vec(&recent.read().as_slice()).unwrap())
                 .unwrap();
             recent_writer.flush().unwrap();
-            gameboy.cpu.load_rom(&rom, &mut gameboy.context);
+            gameboy.load_rom(rom_path);
 
             ui.upgrade_in_event_loop(using!([playback_controller, recent], move |mut handle| {
-                // handle.set_paused(false);
-                // playback_controller.send(true).unwrap();
+                handle.set_paused(false);
+                playback_controller.send(true).unwrap();
                 set_recent(&mut handle, &recent.read());
                 handle.invoke_focus();
             }))
@@ -351,10 +428,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         move |index| {
             let gameboy = &mut *gameboy.lock();
 
-            gameboy.cpu.load_debug_initial_state(&mut gameboy.context);
-
             let rom_path = recent.read()[index as usize].clone();
-            let rom = fs::read(rom_path.clone()).unwrap();
             {
                 let mut recent = recent.write();
                 recent.shift_insert(0, rom_path.clone());
@@ -374,15 +448,59 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .unwrap();
             recent_writer.flush().unwrap();
 
-            gameboy.cpu.load_rom(&rom, &mut gameboy.context);
+            gameboy.load_rom(rom_path);
 
             ui.upgrade_in_event_loop(using!([playback_controller, recent], move |mut handle| {
-                // handle.set_paused(false);
-                // playback_controller.send(true).unwrap();
+                handle.set_paused(false);
+                playback_controller.send(true).unwrap();
                 set_recent(&mut handle, &recent.read());
                 handle.invoke_focus();
             }))
             .unwrap();
+        }
+    ));
+
+    ui.on_dropped(using!(
+        [
+            gameboy,
+            ui.as_weak(),
+            recent,
+            recent_path,
+            playback_controller
+        ],
+        move |drop_event| {
+            let file_url = drop_event.data.plain_text().unwrap();
+
+            let stripped = file_url.strip_prefix("file://").unwrap();
+
+            let rom_path = Path::new(&stripped);
+
+            let gameboy = &mut *gameboy.lock();
+
+            let mut recent_writer = BufWriter::new(
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(recent_path.clone())
+                    .expect("Couldn't open recent data file"),
+            );
+            recent_writer
+                .write_all(&serde_json::to_vec(&recent.read().as_slice()).unwrap())
+                .unwrap();
+            recent_writer.flush().unwrap();
+
+            gameboy.load_rom(rom_path);
+
+            ui.upgrade_in_event_loop(using!([playback_controller, recent], move |mut handle| {
+                handle.set_paused(false);
+                playback_controller.send(true).unwrap();
+                set_recent(&mut handle, &recent.read());
+                handle.invoke_focus();
+            }))
+            .unwrap();
+
+            drop_event.proposed_action
         }
     ));
 
@@ -396,16 +514,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             gameboy,
             ui.as_weak(),
             tile_viewer.as_weak(),
-            tilemap_viewer.as_weak()
-            playback_controller
+            tilemap_viewer.as_weak(),
+            playback_controller,
         ],
         move || {
             let ui = ui.upgrade().unwrap();
             playback_controller.send(false).unwrap();
             ui.set_paused(true);
 
-            let mut gameboy = gameboy.lock();
-            gameboy.tick(true);
+            {
+                let mut gameboy = gameboy.lock();
+                gameboy.tick(true);
+            }
+
             redraw(&gameboy, &ui.as_weak(), &tile_viewer, &tilemap_viewer);
         }
     ));
@@ -448,11 +569,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn redraw(
-    gameboy: &GameBoy,
+    gameboy: &Arc<Mutex<GameBoy>>,
     ui_handle: &Weak<AppWindow>,
     tile_viewer_handle: &Weak<TileViewer>,
     tilemap_viewer_handle: &Weak<TileMapViewer>,
 ) {
+    let gameboy = gameboy.lock();
+
     let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&gameboy.buffer, 160, 144);
 
     let tiles: Vec<_> = gameboy
@@ -526,6 +649,8 @@ fn redraw(
         .io
         .lcd
         .pipe_ref(|lcd| (lcd.scx, lcd.scy));
+
+    drop(gameboy);
 
     tilemap_viewer_handle
         .upgrade_in_event_loop(move |handle| {

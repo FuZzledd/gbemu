@@ -1,30 +1,31 @@
-import { Button, VerticalBox } from "std-widgets.slint";
+import { Button, VerticalBox, Palette } from "std-widgets.slint";
 
-export {TileViewer} from "tile-viewer.slint";
-export { TileMapViewer } from "tilemap-viewer.slint";
+export { TileViewer }from "tile-viewer.slint";
+export { TileMapViewer }from "tilemap-viewer.slint";
 
-enum KeyEventType {
-    press, release
-}
+enum KeyEventType { press, release }
 
 struct KeyboardEvent {
     type: KeyEventType,
     event: KeyEvent,
 }
 
-struct RecentRom { index: int, path: string}
+struct RecentRom { index: int, path: string }
 
 export component AppWindow inherits Window {
     callback load_rom();
     callback load_recent(int);
     callback toggle_playback();
     callback step_tick();
+    callback embed_rom();
 
     callback toggle_tile_viewer();
     callback toggle_tilemap_viewer();
     callback toggle_memory_viewer();
 
     callback key_event(KeyboardEvent);
+
+    callback dropped(DropEvent) -> DragAction;
 
     in-out property <bool> tile_viewer_shown: false;
     in-out property <bool> tilemap_viewer_shown: false;
@@ -34,6 +35,8 @@ export component AppWindow inherits Window {
     in-out property <int> scale_factor: 2;
     in-out property <bool> show_fps: false;
 
+    in-out property <bool> auto_scale: true;
+
     in property <[RecentRom]> recent;
 
     in property <float> fps: 0;
@@ -42,6 +45,25 @@ export component AppWindow inherits Window {
     function restore_focus() {
         key-handler.focus();
     }
+
+    DropArea {
+        can-drop(event) => DragAction.link;
+        dropped(event) => dropped(event);
+    }
+
+    preferred-width: 1000px;
+    preferred-height: 800px;
+
+    in-out property <brush> default_background;
+
+    background: {
+        if self.full-screen {
+            black
+        }
+        else {
+            Palette.background;
+        }
+    };
 
     forward-focus: key-handler;
 
@@ -64,7 +86,22 @@ export component AppWindow inherits Window {
         }
     }
 
+    mouse_area := TouchArea { }
+
     MenuBar {
+        visible: {
+            if !root.full-screen {
+                true
+            }
+            else {
+                if mouse_area.mouse-y < 20px {
+                    true
+                }
+                else {
+                    false
+                }
+            }
+        };
         Menu {
             title: @tr("File");
             MenuItem {
@@ -121,41 +158,82 @@ export component AppWindow inherits Window {
                 }
             }
 
+            MenuItem {
+                title: @tr("Fullscreen");
+                shortcut: @keys(Alt + Return);
+                checkable: true;
+                checked <=> root.full-screen;
+                activated => {
+                }
+            }
+
             Menu {
                 title: @tr("Video Scale");
-                MenuItem {
+                scaleAuto := MenuItem {
+                    title: @tr("Auto");
+                    checkable: true;
+                    checked <=> auto_scale;
+                    activated => {
+                    }
+                }
+
+                MenuSeparator { }
+
+                scale1x := MenuItem {
                     title: @tr("1x");
                     checkable: true;
                     checked: scale_factor == 1;
+                    enabled: !auto_scale;
                     activated => {
                         scale_factor = 1;
+                        scale1x.checked = true;
+                        scale2x.checked = false;
+                        scale3x.checked = false;
+                        scale4x.checked = false;
                     }
                 }
 
-                MenuItem {
+                scale2x := MenuItem {
                     title: @tr("2x");
                     checkable: true;
                     checked: scale_factor == 2;
+                    enabled: !auto_scale;
                     activated => {
                         scale_factor = 2;
+                        scale1x.checked = false;
+                        scale2x.checked = true;
+                        scale3x.checked = false;
+                        scale4x.checked = false;
                     }
                 }
 
-                MenuItem {
+                scale3x := MenuItem {
                     title: @tr("3x");
                     checkable: true;
                     checked: scale_factor == 3;
+                    enabled: !auto_scale;
+
                     activated => {
                         scale_factor = 3;
+                        scale1x.checked = false;
+                        scale2x.checked = false;
+                        scale3x.checked = true;
+                        scale4x.checked = false;
                     }
                 }
 
-                MenuItem {
+                scale4x := MenuItem {
                     title: @tr("4x");
                     checkable: true;
                     checked: scale_factor == 4;
+                    enabled: !auto_scale;
+
                     activated => {
                         scale_factor = 4;
+                        scale1x.checked = false;
+                        scale2x.checked = false;
+                        scale3x.checked = false;
+                        scale4x.checked = true;
                     }
                 }
             }
@@ -163,62 +241,78 @@ export component AppWindow inherits Window {
 
         Menu {
             title: @tr("Tools");
+
+            MenuItem {
+                title: @tr("Embed ROM in PNG");
+                activated => embed_rom();
+            }
+
             MenuItem {
                 title: @tr("Tile Viewer");
                 checkable: true;
                 checked <=> tile_viewer_shown;
-                activated => {
-                    toggle_tile_viewer()
-                }
+                activated => toggle_tile_viewer();
             }
 
             MenuItem {
                 title: @tr("Tile Map Viewer");
                 checkable: true;
                 checked <=> tilemap_viewer_shown;
-                activated => {
-                    toggle_tilemap_viewer()
-                }
+                activated => toggle_tilemap_viewer();
             }
 
             MenuItem {
                 title: @tr("Memory Viewer");
                 checkable: true;
                 checked <=> memory_viewer_shown;
-                activated => {
-                    toggle_memory_viewer()
-                }
+                activated => toggle_memory_viewer();
             }
         }
     }
 
-    Rectangle {
-        min-height: screen_elem.height;
-        min-width: screen_elem.width;
+    HorizontalLayout {
+        height: 100%;
+        alignment: stretch;
         forward-focus: key-handler;
 
-        Rectangle {
-            background: black;
-            width: 160px * scale_factor;
-            height: 144px * scale_factor;
-            Text {
-                horizontal-alignment: right;
-                stroke: black;
-                stroke-width: 2px;
-                visible: show_fps;
-                x: 0;
-                y: 0;
-                width: 100%;
-                text: fps.to-fixed(1);
-                z: 20;
-            }
+        screen_rect := Rectangle {
+            min-width: auto_scale ? 160px : 160px * scale_factor;
+            min-height: auto_scale ? 144px : 144px * scale_factor;
+            clip: false;
+            horizontal-stretch: 1;
+            forward-focus: key-handler;
 
-            screen_elem := Image {
+            Rectangle {
+                in property <float> scale_factor: auto_scale ? floor(min(parent.width / 160px, parent.height / 144px)) : root.scale_factor;
+
+                background: black;
+                clip: true;
                 width: 160px * scale_factor;
                 height: 144px * scale_factor;
-                image-fit: ImageFit.contain;
-                image-rendering: pixelated;
-                source <=> screen;
+                horizontal-stretch: 1;
+
+                Text {
+                    horizontal-alignment: right;
+                    stroke: black;
+                    stroke-width: 2px;
+                    visible: show_fps;
+                    x: 0;
+                    y: 0;
+                    width: 100%;
+                    text: fps.to-fixed(1);
+                    z: 20;
+                }
+
+                screen_elem := Image {
+                    forward-focus: key-handler;
+                    x: 0;
+                    y: 0;
+                    width: 160px * scale_factor;
+                    height: 144px * scale_factor;
+                    image-fit: ImageFit.contain;
+                    image-rendering: pixelated;
+                    source <=> screen;
+                }
             }
         }
     }

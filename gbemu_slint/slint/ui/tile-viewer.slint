@@ -8,19 +8,32 @@ export struct Tile {
 export component TileViewer inherits Window {
     min-width: 250px;
     min-height: 400px;
-    title: @tr("Tile Map Viewer");
+    title: @tr("Tile Viewer");
     in-out property <[Tile]> tiles;
-    max-height: 1px / 0;
-    max-width: 1px / 0;
-    GridBox {
-        spacing: 0px;
-        for tile in tiles: Image {
-            row: tile.index / 32;
-            col: mod(tile.index, 32);
-            width: 16px;
-            height: 16px;
-            source: tile.buffer;
-            image-rendering: pixelated;
+    max-height: 1px / 0.0001;
+    max-width: 1px / 0.0001;
+    HorizontalLayout {
+        height: 100%;
+        alignment: stretch;
+
+        Rectangle {
+            clip: false;
+            height: 100%;
+            horizontal-stretch: 1;
+            Rectangle {
+                clip: true;
+                height: 100%;
+                horizontal-stretch: 1;
+
+                for tile in tiles: Image {
+                    y: floor(tile.index / floor(parent.width / 16px)) * 16px;
+                    x: floor(mod(tile.index, floor(parent.width / 16px))) * 16px;
+                    width: 16px;
+                    height: 16px;
+                    source: tile.buffer;
+                    image-rendering: pixelated;
+                }
+            }
         }
     }
 }

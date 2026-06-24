@@ -27,10 +27,14 @@ dasp = {
 dasp_sample = { workspace = true }
 etcetera = { workspace = true }
 gbemu_core = { workspace = true }
+image.workspace = true
+image24 = { package = "image", version = "0.24.9" }
 indexmap = { workspace = true, features = ["serde"] }
 itertools = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
+png.workspace = true
+png-achunk.workspace = true
 rfd = { workspace = true }
 ringbuf = { workspace = true }
 serde = { workspace = true }

@@ -1,185 +1,173 @@
+use core::ops::Index;
+
 use better_default::Default;
 use bitvec::prelude::*;
 use bytemuck::TransparentWrapper;
 use strum::FromRepr;
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct AudioEnable(#[default(0b11111111)] pub(crate) u8);
+use chapa::{BitEnum, bitfield};
+
+#[bitfield(u8, order = lsb0, width = 4)]
+#[derive(Default, Copy, Clone, PartialEq, Debug)]
+pub struct ChannelsEnabled {
+    #[bits(0)]
+    channel1_enabled: bool,
+    #[bits(1)]
+    channel2_enabled: bool,
+    #[bits(2)]
+    channel3_enabled: bool,
+    #[bits(3)]
+    channel4_enabled: bool,
+}
+
+impl<T> Index<T> for ChannelsEnabled
+where
+    usize: From<T>,
+{
+    type Output = bool;
+
+    #[inline(always)]
+    fn index(&self, index: T) -> &Self::Output {
+        if match usize::from(index) {
+            0 => self.channel1_enabled(),
+            1 => self.channel2_enabled(),
+            2 => self.channel3_enabled(),
+            3 => self.channel4_enabled(),
+            _ => panic!("Out of range for bitfield"),
+        } {
+            &true
+        } else {
+            &false
+        }
+    }
+}
+
+#[bitfield(u8, order = lsb0)]
+#[derive(Default, Copy, Clone, PartialEq, Debug)]
+pub struct AudioEnable {
+    #[bits(7, default = true)]
+    audio_enabled: bool,
+    #[bits(4..=6, default = 0b111)]
+    _unused: u8,
+    #[bits(0..=3, overlay="together")]
+    channels: ChannelsEnabled,
+    #[bits(0, overlay = "individual", default = true)]
+    channel1_enabled: bool,
+    #[bits(1, overlay = "individual", default = true)]
+    channel2_enabled: bool,
+    #[bits(2, overlay = "individual", default = true)]
+    channel3_enabled: bool,
+    #[bits(3, overlay = "individual", default = true)]
+    channel4_enabled: bool,
+}
 
 impl AudioEnable {
-    pub fn audio_enabled(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[7]
-    }
-    pub fn set_audio_enabled(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(7, enabled);
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        (self | 0b0111_0000).into()
     }
 
-    pub fn channel_1_enabled(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[0]
-    }
-    pub fn channel_2_enabled(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[1]
-    }
-    pub fn channel_3_enabled(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[2]
-    }
-    pub fn channel_4_enabled(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[3]
-    }
-
-    pub fn read(&self) -> u8 {
-        self.0 | 0b0111_0000
-    }
-
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
-        self.0
-            .view_bits_mut::<Lsb0>()
-            .set(7, value.view_bits::<Lsb0>()[7]);
+        self.set_audio_enabled(Self::from(value).audio_enabled());
     }
 
-    pub fn set_channel_1_enabled(&mut self, value: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(0, value)
-    }
-
-    pub fn set_channel_2_enabled(&mut self, value: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(1, value)
-    }
-
-    pub fn set_channel_3_enabled(&mut self, value: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(2, value)
-    }
-
-    pub fn set_channel_4_enabled(&mut self, value: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(3, value)
+    #[inline(always)]
+    pub fn set_channel<T>(&mut self, idx: T, value: bool)
+    where
+        usize: From<T>,
+    {
+        match usize::from(idx) {
+            0 => self.set_channel1_enabled(value),
+            1 => self.set_channel2_enabled(value),
+            2 => self.set_channel3_enabled(value),
+            3 => self.set_channel4_enabled(value),
+            _ => panic!("Out of range for bitfield"),
+        }
     }
 }
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct AudioPanning(#[default(0b11111111)] pub(crate) u8);
+#[bitfield(u8, order = lsb0, width = 5)]
+#[derive(Default, Copy, Clone, PartialEq, Debug)]
+pub struct ChannelPanning {
+    #[bits(0, default = true)]
+    right: bool,
+    #[bits(1..=3)]
+    _padded: u8,
+    #[bits(4, default = true)]
+    left: bool,
+}
+
+#[bitfield(u8, order = lsb0)]
+#[derive(Default, Copy, Clone, PartialEq, Debug)]
+pub struct AudioPanning {
+    #[bits(0..=7, overlay="all", default = 0xFF)]
+    _all: u8,
+    #[bits(0..=4, overlay="channel1")]
+    channel1: ChannelPanning,
+    #[bits(1..=5, overlay="channel2")]
+    channel2: ChannelPanning,
+    #[bits(2..=6, overlay="channel3")]
+    channel3: ChannelPanning,
+    #[bits(3..=7, overlay="channel4")]
+    channel4: ChannelPanning,
+}
 
 impl AudioPanning {
-    pub fn read(&self) -> u8 {
-        self.0
+    pub fn read(self) -> u8 {
+        self.into()
     }
 
     pub fn write(&mut self, value: u8) {
-        self.0 = value;
+        *self = value.into();
     }
 
-    pub fn channel_4_left(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[7]
-    }
-
-    pub fn set_channel_4_left(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(7, enabled);
-    }
-
-    pub fn channel_3_left(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[6]
-    }
-
-    pub fn set_channel_3_left(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(6, enabled);
-    }
-
-    pub fn channel_2_left(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[5]
-    }
-
-    pub fn set_channel_2_left(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(5, enabled);
-    }
-
-    pub fn channel_1_left(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[4]
-    }
-
-    pub fn set_channel_1_left(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(4, enabled);
-    }
-
-    pub fn channel_4_right(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[3]
-    }
-
-    pub fn set_channel_4_right(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(3, enabled);
-    }
-
-    pub fn channel_3_right(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[2]
-    }
-    pub fn set_channel_3_right(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(2, enabled);
-    }
-
-    pub fn channel_2_right(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[1]
-    }
-
-    pub fn set_channel_2_right(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(1, enabled);
-    }
-
-    pub fn channel_1_right(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[0]
-    }
-
-    pub fn set_channel_1_right(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(0, enabled);
+    pub fn get<T>(&self, idx: T) -> ChannelPanning
+    where
+        usize: From<T>,
+    {
+        match usize::from(idx) {
+            0 => self.channel1(),
+            1 => self.channel2(),
+            2 => self.channel3(),
+            3 => self.channel4(),
+            _ => panic!("Out of range for bitfield"),
+        }
     }
 }
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct AudioVolume(#[default(0b01110111)] pub(crate) u8);
+// #[derive(Default, Debug, TransparentWrapper)]
+// #[repr(transparent)]
+// pub struct AudioVolume(#[default(0b01110111)] pub(crate) u8);
+
+#[bitfield(u8, order = lsb0)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct AudioVolume {
+    #[bits(4..=6, overlay="base", default = 0b111)]
+    left_volume: u8,
+    #[bits(0..=2, overlay="base",default = 0b111)]
+    right_volume: u8,
+    #[bits(3..=7, overlay="vin")]
+    vin_enable: ChannelPanning,
+}
 
 impl AudioVolume {
-    pub fn read(&self) -> u8 {
-        self.0
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        self.into()
     }
 
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
-        self.0 = value;
-    }
-
-    pub fn vin_left(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[7]
-    }
-    pub fn set_vin_left(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(7, enabled);
-    }
-
-    pub fn left_volume(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[4..=6].load_le()
-    }
-
-    pub fn set_left_volume(&mut self, volume: u8) {
-        self.0.view_bits_mut::<Lsb0>()[4..=6].store_le(volume);
-    }
-
-    pub fn vin_right(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[3]
-    }
-
-    pub fn set_vin_right(&mut self, enabled: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(3, enabled);
-    }
-
-    pub fn right_volume(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[0..=2].load_le()
-    }
-    pub fn set_right_volume(&mut self, volume: u8) {
-        self.0.view_bits_mut::<Lsb0>().store_le(volume);
+        *self = value.into();
     }
 }
 
-#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy)]
+#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
 #[repr(u8)]
 pub enum SweepDirection {
     #[default]
+    #[fallback]
     Addition = 0,
     Subtraction = 1,
 }
@@ -201,45 +189,34 @@ impl From<SweepDirection> for bool {
         }
     }
 }
-
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelSweep(#[default(0b1000_0000)] pub(crate) u8);
+#[bitfield(u8, order=lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
+pub struct ChannelSweep {
+    #[bits(7, default = true)]
+    _unused: bool,
+    #[bits(4..=6)]
+    pace: u8,
+    #[bits(3, default = SweepDirection::default())]
+    direction: SweepDirection,
+    #[bits(0..=2)]
+    step: u8,
+}
 
 impl ChannelSweep {
-    pub fn read(&self) -> u8 {
-        self.0 | 0b1000_0000
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        (self | 0b1000_0000).into()
     }
 
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
-        self.0 = value | 0b1000_0000;
-    }
-
-    pub fn pace(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[4..=6].load_le()
-    }
-    pub fn set_pace(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[4..=6].store_le(value);
-    }
-
-    pub fn direction(&self) -> SweepDirection {
-        self.0.view_bits::<Lsb0>()[3].into()
-    }
-
-    pub fn set_direction(&mut self, value: SweepDirection) {
-        self.0.view_bits_mut::<Lsb0>().set(3, value.into());
-    }
-
-    pub fn step(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[0..=2].load_le()
-    }
-    pub fn set_step(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[0..=2].store_le(value);
+        *self = (value | 0b1000_0000).into();
     }
 }
-#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy)]
+#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
 #[repr(u8)]
 pub enum WaveDuty {
+    #[fallback]
     #[default]
     Eighth = 0b00,
     Quarter = 0b01,
@@ -258,39 +235,30 @@ impl WaveDuty {
     }
 }
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelLengthTimerWithDuty(#[default(0b00111111)] pub(crate) u8);
+#[bitfield(u8, order=lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
+pub struct ChannelLengthTimerWithDuty {
+    #[bits(6..=7, default = WaveDuty::default())]
+    wave_duty: WaveDuty,
+    #[bits(0..=5, default = 0b11_1111)]
+    length_timer: u8,
+}
 
 impl ChannelLengthTimerWithDuty {
-    pub fn wave_duty(&self) -> WaveDuty {
-        WaveDuty::from_repr(self.0.view_bits::<Lsb0>()[6..=7].load_le()).unwrap_or(WaveDuty::Eighth)
-    }
-
-    pub fn set_wave_duty(&mut self, value: WaveDuty) {
-        self.0.view_bits_mut::<Lsb0>()[6..=7].store_le(value as u8);
-    }
-
-    pub fn length_timer(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[0..=5].load_le()
-    }
-    pub fn set_length_timer(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[0..=5].store_le(value);
-    }
-
-    pub fn read(&self) -> u8 {
-        self.0 | 0b0011_1111
+    pub fn read(self) -> u8 {
+        (self | 0b0011_1111).into()
     }
 
     pub fn write(&mut self, value: u8) {
-        self.0 = value;
+        *self = value.into();
     }
 }
 
-#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy)]
+#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
 #[repr(u8)]
 pub enum EnvelopeDirection {
     #[default]
+    #[fallback]
     Decrease = 0,
     Increase = 1,
 }
@@ -313,77 +281,52 @@ impl From<EnvelopeDirection> for bool {
     }
 }
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelVolumeEnvelope(#[default(0b11110000)] pub(crate) u8);
+#[bitfield(u8, order=lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Copy, Clone, PartialEq)]
+pub struct ChannelVolumeEnvelope {
+    #[bits(4..=7, default = 0b1111)]
+    initial_volume: u8,
+    #[bits(3)]
+    envelope_direction: EnvelopeDirection,
+    #[bits(0..=2)]
+    sweep_pace: u8,
+}
 
 impl ChannelVolumeEnvelope {
-    pub fn read(&self) -> u8 {
-        self.0
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        self.into()
     }
-
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
-        self.0 = value;
-    }
-
-    pub fn initial_volume(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[4..=7].load_le()
-    }
-    pub fn set_initial_volume(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[4..=7].store_le(value);
-    }
-
-    pub fn envelope_direction(&self) -> EnvelopeDirection {
-        self.0.view_bits::<Lsb0>()[3].into()
-    }
-
-    pub fn set_envelope_direction(&mut self, value: EnvelopeDirection) {
-        self.0.view_bits_mut::<Lsb0>().set(3, value.into());
-    }
-
-    pub fn sweep_pace(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[0..=2].load_le()
-    }
-    pub fn set_sweep_pace(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[0..=2].store_le(value);
+        *self = value.into();
     }
 }
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelPeriodControl(#[default(0b01111111_11111111)] pub(crate) u16);
+#[bitfield(u16, order = lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
+pub struct ChannelPeriodControl {
+    #[bits(0..=7, overlay="registers")]
+    low: u8,
+    #[bits(8..=15, overlay="registers")]
+    high: u8,
+    #[bits(0..=10, default = 0b111_1111_1111, overlay="default")]
+    period: u16,
+    #[bits(15, default = true, overlay = "default")]
+    trigger: bool,
+    #[bits(14, default = false, overlay = "default")]
+    length_enable: bool,
+    #[bits(11..=13, default = 0b111, overlay="default")]
+    _unused: u8,
+}
+
 impl ChannelPeriodControl {
-    pub fn read(&self) -> u16 {
-        self.0 | 0b10111111_11111111
+    pub fn read(self) -> u16 {
+        (self | 0b1011_1111_1111_1111).into()
     }
 
-    pub fn write_low(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[0..=7].store_be(value);
-    }
-
-    pub fn write_high(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[8..=15].store_be(value);
-    }
-
-    pub fn period(&self) -> u16 {
-        self.0.view_bits::<Lsb0>()[0..=10].load_be()
-    }
-    pub fn set_period(&mut self, value: u16) {
-        self.0.view_bits_mut::<Lsb0>()[0..=10].store_be(value);
-    }
-
-    pub fn length_enable(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[14]
-    }
-    pub fn set_length_enable(&mut self, value: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(14, value)
-    }
-
-    pub fn trigger(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[15]
-    }
-    pub fn set_trigger(&mut self, value: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(15, value)
+    pub fn write(&mut self, value: u16) {
+        *self = value.into()
     }
 }
 

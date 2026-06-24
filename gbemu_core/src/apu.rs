@@ -1,7 +1,10 @@
 use core::{array, cmp};
 use std::collections::VecDeque;
 
-use crate::context::{Context, Memory};
+use crate::{
+    apu::registers::ChannelsEnabled,
+    context::{Context, Memory, MemoryBus},
+};
 use crate::{
     apu::registers::EnvelopeDirection,
     context::{Io, TimerRegister},
@@ -14,10 +17,10 @@ use crossbeam::channel::{self, Receiver, Sender};
 use dasp::{Frame, Sample};
 use itertools::{Itertools, izip};
 use tracing::instrument;
-
+use uzi::using;
 pub(crate) mod registers;
 
-type Channel<T> = (Sender<T>, Receiver<T>);
+type ExternalChannel<T> = (Sender<T>, Receiver<T>);
 
 fn create_blip_bufs() -> [BlipBuf; 2] {
     array::from_fn(|_| {
@@ -46,12 +49,20 @@ pub struct APU {
     prev_frame: [i16; 2],
 
     #[default(channel::bounded(512))]
-    pub output_channel: Channel<VecDeque<[i16; 2]>>,
+    pub output_channel: ExternalChannel<VecDeque<[i16; 2]>>,
 }
 
 impl APU {
+    fn channels_mut(&mut self) -> [&mut dyn Channel<MemoryBus>; 3] {
+        [&mut self.channel1, &mut self.channel2, &mut self.channel3]
+    }
+
+    fn channels(&self) -> [&dyn Channel<MemoryBus>; 3] {
+        [&self.channel1, &self.channel2, &self.channel3]
+    }
+
     #[instrument(skip_all)]
-    pub fn tick<M: Default + Memory>(&mut self, ctx: &mut Context<M>) {
+    pub fn tick(&mut self, ctx: &mut Context<MemoryBus>) {
         let div_bit_5 = ctx.memory.io().timer().div().view_bits::<Lsb0>()[5];
 
         if !self.div_prev && div_bit_5 {
@@ -59,68 +70,40 @@ impl APU {
         }
         self.div_prev = div_bit_5;
 
-        let channel1_out = self
-            .channel1
-            .tick(ctx, self.div_apu, self.cycle_counter, self.clocks);
-        let channel2_out = self
-            .channel2
-            .tick(ctx, self.div_apu, self.cycle_counter, self.clocks);
-        let channel3_out = self
-            .channel3
-            .tick(ctx, self.div_apu, self.cycle_counter, self.clocks);
-
         let audio_volume = ctx.memory.io().audio().nr50();
         let left_volume = (audio_volume.left_volume() + 1) as f64 / 9.0;
         let right_volume = (audio_volume.right_volume() + 1) as f64 / 9.0;
 
-        let audio_panning = ctx.memory.io().audio().nr51();
+        let audio_panning = *ctx.memory.io().audio().nr51();
 
-        let frame = [
-            [
-                if audio_panning.channel_1_left() {
-                    channel1_out
-                } else {
-                    0.0
-                },
-                if audio_panning.channel_1_right() {
-                    channel1_out
-                } else {
-                    0.0
-                },
-            ],
-            [
-                if audio_panning.channel_2_left() {
-                    channel2_out
-                } else {
-                    0.0
-                },
-                if audio_panning.channel_2_right() {
-                    channel2_out
-                } else {
-                    0.0
-                },
-            ],
-            [
-                if audio_panning.channel_3_left() {
-                    channel3_out
-                } else {
-                    0.0
-                },
-                if audio_panning.channel_3_right() {
-                    channel3_out
-                } else {
-                    0.0
-                },
-            ],
-            [0.0, 0.0],
-        ]
-        .into_iter()
-        .fold([0.0, 0.0], |acc, input| acc.add_amp(input))
-        .mul_amp([left_volume / 4.0, right_volume / 4.0])
-        .map(|sample| sample.to_sample::<i16>());
+        let frame = {
+            let div_apu = self.div_apu;
+            let cycle_counter = self.cycle_counter;
+            let clocks = self.clocks;
+            self.channels_mut()
+                .into_iter()
+                .enumerate()
+                .map(|(idx, channel)| {
+                    let out = channel.tick(ctx, div_apu, cycle_counter, clocks);
+                    [
+                        if audio_panning.get(idx).left() {
+                            out * left_volume / 4.0
+                        } else {
+                            0.0
+                        },
+                        if audio_panning.get(idx).right() {
+                            out * right_volume / 4.0
+                        } else {
+                            0.0
+                        },
+                    ]
+                })
+                .fold([0.0, 0.0], |[sum_l, sum_r], [l, r]| [sum_l + l, sum_r + r])
+                .map(Sample::to_sample::<i16>)
+        };
 
         for (buf, sample, prev) in izip!(self.blip_bufs.iter_mut(), frame, self.prev_frame) {
-            buf.add_delta(self.clocks, sample as i32 - prev as i32);
+            buf.add_delta_fast(self.clocks, sample as i32 - prev as i32);
         }
 
         self.prev_frame = frame;
@@ -140,9 +123,9 @@ impl APU {
         }
 
         let audio_control = ctx.memory.io_mut().audio_mut().nr52_mut();
-        audio_control.set_channel_1_enabled(self.channel1.enable);
-        audio_control.set_channel_2_enabled(self.channel2.enable);
-        audio_control.set_channel_2_enabled(self.channel3.enable);
+        for i in 0..3 {
+            audio_control.set_channel(i, self.channels()[i].enabled());
+        }
 
         self.cycle_counter = self.cycle_counter.wrapping_add(1);
         self.clocks = (self.clocks + 1) % self.blip_bufs[0].clocks_needed(512);
@@ -154,6 +137,17 @@ fn to_i32(value: u8) -> i32 {
 }
 fn dac(value: u8) -> f64 {
     -(value as f64) / 15.0 + 0.5
+}
+
+trait Channel<M: Default + Memory> {
+    fn tick(&mut self, ctx: &mut Context<M>, div_apu: u8, cycle_count: u64, _clocks: u32) -> f64;
+
+    #[allow(clippy::collapsible_if)]
+    fn div_apu_tick(&mut self, ctx: &mut Context<M>, div_apu: u8);
+
+    fn trigger(&mut self, ctx: &mut Context<M>);
+
+    fn enabled(&self) -> bool;
 }
 
 #[derive(Default)]
@@ -186,10 +180,10 @@ struct Channel1 {
     capacitor: f64,
 }
 
-impl Channel1 {
-    fn tick<M: Default + Memory>(
+impl Channel<MemoryBus> for Channel1 {
+    fn tick(
         &mut self,
-        ctx: &mut Context<M>,
+        ctx: &mut Context<MemoryBus>,
         div_apu: u8,
         cycle_count: u64,
         _clocks: u32,
@@ -250,7 +244,7 @@ impl Channel1 {
     }
 
     #[allow(clippy::collapsible_if)]
-    fn div_apu_tick<M: Default + Memory>(&mut self, ctx: &mut Context<M>, div_apu: u8) {
+    fn div_apu_tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
         }
@@ -298,7 +292,7 @@ impl Channel1 {
         self.div_apu_prev = div_apu;
     }
 
-    fn trigger<M: Default + Memory>(&mut self, ctx: &mut Context<M>) {
+    fn trigger(&mut self, ctx: &mut Context<MemoryBus>) {
         self.enable = true;
         self.period = ctx.memory.io().audio().nr13_14().period();
         self.period_divider = self.period;
@@ -318,7 +312,13 @@ impl Channel1 {
         }
     }
 
-    fn calculate_sweep<M: Default + Memory>(&mut self, ctx: &mut Context<M>, write_back: bool) {
+    fn enabled(&self) -> bool {
+        self.enable
+    }
+}
+
+impl Channel1 {
+    fn calculate_sweep(&mut self, ctx: &mut Context<MemoryBus>, write_back: bool) {
         let frequency = {
             let modifier = self.period >> self.sweep_individual_step;
             match self.sweep_direction {
@@ -363,10 +363,10 @@ struct Channel2 {
     capacitor: f64,
 }
 
-impl Channel2 {
-    fn tick<M: Default + Memory>(
+impl Channel<MemoryBus> for Channel2 {
+    fn tick(
         &mut self,
-        ctx: &mut Context<M>,
+        ctx: &mut Context<MemoryBus>,
         div_apu: u8,
         cycle_count: u64,
         _clocks: u32,
@@ -398,7 +398,6 @@ impl Channel2 {
         if cycle_count.is_multiple_of(4) {
             if self.period_divider == 0x7FF {
                 self.period = ctx.memory.io().audio().nr23_24().period();
-                // println!("period: 0x{:03X}", self.period);
                 self.period_divider = self.period;
                 self.duty_step = (self.duty_step + 1) % 8;
             } else {
@@ -423,7 +422,7 @@ impl Channel2 {
     }
 
     #[allow(clippy::collapsible_if)]
-    fn div_apu_tick<M: Default + Memory>(&mut self, _ctx: &mut Context<M>, div_apu: u8) {
+    fn div_apu_tick(&mut self, _ctx: &mut Context<MemoryBus>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
         }
@@ -457,7 +456,7 @@ impl Channel2 {
         self.div_apu_prev = div_apu;
     }
 
-    fn trigger<M: Default + Memory>(&mut self, ctx: &mut Context<M>) {
+    fn trigger(&mut self, ctx: &mut Context<MemoryBus>) {
         self.enable = true;
         self.period = ctx.memory.io().audio().nr23_24().period();
         self.period_divider = self.period;
@@ -469,6 +468,10 @@ impl Channel2 {
         if self.length_timer >= 64 {
             self.length_timer = ctx.memory.io().audio().nr21().length_timer()
         }
+    }
+
+    fn enabled(&self) -> bool {
+        self.enable
     }
 }
 
@@ -498,10 +501,10 @@ struct Channel3 {
     capacitor: f64,
 }
 
-impl Channel3 {
-    fn tick<M: Default + Memory>(
+impl Channel<MemoryBus> for Channel3 {
+    fn tick(
         &mut self,
-        ctx: &mut Context<M>,
+        ctx: &mut Context<MemoryBus>,
         div_apu: u8,
         cycle_count: u64,
         _clocks: u32,
@@ -571,7 +574,7 @@ impl Channel3 {
     }
 
     #[allow(clippy::collapsible_if)]
-    fn div_apu_tick<M: Default + Memory>(&mut self, _ctx: &mut Context<M>, div_apu: u8) {
+    fn div_apu_tick(&mut self, _ctx: &mut Context<MemoryBus>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
         }
@@ -589,7 +592,7 @@ impl Channel3 {
         self.div_apu_prev = div_apu;
     }
 
-    fn trigger<M: Default + Memory>(&mut self, ctx: &mut Context<M>) {
+    fn trigger(&mut self, ctx: &mut Context<MemoryBus>) {
         self.enable = true;
         self.period = ctx.memory.io().audio().nr33_34().period();
         self.period_divider = self.period;
@@ -600,6 +603,10 @@ impl Channel3 {
         if self.length_timer >= 256 {
             self.length_timer = ctx.memory.io().audio().nr31().length_timer() as u16;
         }
+    }
+
+    fn enabled(&self) -> bool {
+        self.enable
     }
 }
 
@@ -776,18 +783,18 @@ impl AudioRegister for AudioRegisters {
             0x10 => self.nr10_mut().write(value),
             0x11 => self.nr11_mut().write(value),
             0x12 => self.nr12_mut().write(value),
-            0x13 => self.nr13_14_mut().write_low(value),
-            0x14 => self.nr13_14_mut().write_high(value),
+            0x13 => self.nr13_14_mut().set_low(value),
+            0x14 => self.nr13_14_mut().set_high(value),
             0x15 => unimplemented_audio_write(address, value),
             0x16 => self.nr21_mut().write(value),
             0x17 => self.nr22_mut().write(value),
-            0x18 => self.nr23_24_mut().write_low(value),
-            0x19 => self.nr23_24_mut().write_high(value),
+            0x18 => self.nr23_24_mut().set_low(value),
+            0x19 => self.nr23_24_mut().set_high(value),
             0x1A => self.nr30_mut().write(value),
             0x1B => self.nr31_mut().write(value),
             0x1C => self.nr32_mut().write(value),
-            0x1D => self.nr33_34_mut().write_low(value),
-            0x1E => self.nr33_34_mut().write_high(value),
+            0x1D => self.nr33_34_mut().set_low(value),
+            0x1E => self.nr33_34_mut().set_high(value),
             0x1F => unimplemented_audio_write(address, value),
             0x20..=0x23 => unimplemented_audio_write(address, value),
             0x24 => self.nr50_mut().write(value),

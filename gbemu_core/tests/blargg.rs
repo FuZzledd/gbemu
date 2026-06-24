@@ -8,9 +8,9 @@ datatest_stable::harness! {
     {test = test_cpu_instrs, root = "../test_roms/blargg_tests/cpu_instrs/individual", pattern = r".*\.gb"}
 }
 
-fn test_cpu_instrs(_path: &Utf8Path, rom: Vec<u8>) -> datatest_stable::Result<()> {
+fn test_cpu_instrs(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()> {
     let mut gameboy: GameBoy = GameBoy::default();
-    gameboy.cpu.load_rom(&rom, &mut gameboy.context);
+    gameboy.load_rom(path);
 
     let mut output = Vec::new();
 
@@ -52,9 +52,10 @@ fn test_cpu_instrs(_path: &Utf8Path, rom: Vec<u8>) -> datatest_stable::Result<()
         }
     }
 
-    let image = common::inline_iterm2_image_from_buffer(gameboy.buffer.clone());
+    let image =
+        common::inline_iterm2_image_from_buffer(gameboy.buffer.clone(), path.file_name().unwrap());
 
-    println!("Result\n {image}");
+    println!("Result\n {image}",);
 
     assert!(status);
 

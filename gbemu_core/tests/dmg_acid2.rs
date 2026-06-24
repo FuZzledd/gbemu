@@ -3,7 +3,7 @@
 use gbemu_core::{GameBoy, ppu};
 use image::ImageFormat::Png;
 use rgb::Gray;
-use std::hash_map;
+use std::{hash_map, path::Path};
 
 mod common;
 
@@ -21,10 +21,7 @@ fn test_dmg_acid2() {
 
     gameboy.palette = palette;
 
-    gameboy.cpu.load_rom(
-        include_bytes!("../../test_roms/dmg_acid2/dmg-acid2.gb"),
-        &mut gameboy.context,
-    );
+    gameboy.load_rom(Path::new("../../test_roms/dmg_acid2/dmg-acid2.gb"));
 
     for _ in 0..=10 {
         loop {
@@ -42,7 +39,7 @@ fn test_dmg_acid2() {
     .unwrap()
     .into_rgba8();
 
-    let inline_image = common::inline_iterm2_image_from_buffer(buffer.clone());
+    let inline_image = common::inline_iterm2_image_from_buffer(buffer.clone(), "dmg_acid2");
     println!("Result:\n {inline_image}");
     if buffer != *reference_image {
         panic!("Did not match reference image");

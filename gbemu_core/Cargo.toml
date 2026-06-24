@@ -22,12 +22,14 @@ bitvec = { workspace = true }
 blip_buf = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
 bytes = { workspace = true }
+chapa = { workspace = true }
 crossbeam = { workspace = true }
 dasp = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
 paste = { workspace = true }
+png-achunk.workspace = true
 rgb = { workspace = true }
 ringbuf = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -35,7 +37,10 @@ serde_json = { workspace = true }
 spire_enum = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
 tap = { workspace = true }
+time = { workspace = true }
 tracing = { workspace = true }
+unarc-rs.workspace = true
+uzi = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }
