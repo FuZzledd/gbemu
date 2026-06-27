@@ -63,7 +63,7 @@ impl APU {
 
     #[instrument(skip_all)]
     pub fn tick(&mut self, ctx: &mut Context<MemoryBus>) {
-        let div_bit_5 = ctx.memory.io().timer().div().view_bits::<Lsb0>()[5];
+        let div_bit_5 = ctx.memory.io().timer().div() & (1 << 5) != 0;
 
         if !self.div_prev && div_bit_5 {
             self.div_apu = self.div_apu.wrapping_add(1) % 8

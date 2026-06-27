@@ -17,6 +17,8 @@ export component AppWindow inherits Window {
     callback load_recent(int);
     callback toggle_playback();
     callback step_tick();
+    callback step_frame();
+
     callback embed_rom();
 
     callback toggle_tile_viewer();
@@ -41,6 +43,21 @@ export component AppWindow inherits Window {
 
     in property <float> fps: 0;
     in-out property <image> screen;
+
+    callback clear_scale_selections(int);
+
+    in-out property <[{ checked: bool, scale: int }]> scales: [
+        { checked: false, scale: 1 },
+        { checked: true, scale: 2 },
+        { checked: false, scale: 3 },
+        { checked: false, scale: 4 },
+        { checked: false, scale: 5 },
+        { checked: false, scale: 6 },
+        { checked: false, scale: 7 },
+        { checked: false, scale: 8 },
+        { checked: false, scale: 9 },
+        { checked: false, scale: 10 }
+    ];
 
     function restore_focus() {
         key-handler.focus();
@@ -146,6 +163,14 @@ export component AppWindow inherits Window {
                 }
                 shortcut: @keys(Control + T);
             }
+
+            MenuItem {
+                title: @tr("Step Frame");
+                activated => {
+                    step_frame()
+                }
+                shortcut: @keys(Control + S);
+            }
         }
 
         Menu {
@@ -167,7 +192,8 @@ export component AppWindow inherits Window {
                 }
             }
 
-            Menu {
+            video_menu := Menu {
+
                 title: @tr("Video Scale");
                 scaleAuto := MenuItem {
                     title: @tr("Auto");
@@ -179,61 +205,14 @@ export component AppWindow inherits Window {
 
                 MenuSeparator { }
 
-                scale1x := MenuItem {
-                    title: @tr("1x");
+                for scale in scales: MenuItem {
+                    title: scale.scale + @tr("x");
                     checkable: true;
-                    checked: scale_factor == 1;
+                    checked <=> scale.checked;
                     enabled: !auto_scale;
                     activated => {
-                        scale_factor = 1;
-                        scale1x.checked = true;
-                        scale2x.checked = false;
-                        scale3x.checked = false;
-                        scale4x.checked = false;
-                    }
-                }
-
-                scale2x := MenuItem {
-                    title: @tr("2x");
-                    checkable: true;
-                    checked: scale_factor == 2;
-                    enabled: !auto_scale;
-                    activated => {
-                        scale_factor = 2;
-                        scale1x.checked = false;
-                        scale2x.checked = true;
-                        scale3x.checked = false;
-                        scale4x.checked = false;
-                    }
-                }
-
-                scale3x := MenuItem {
-                    title: @tr("3x");
-                    checkable: true;
-                    checked: scale_factor == 3;
-                    enabled: !auto_scale;
-
-                    activated => {
-                        scale_factor = 3;
-                        scale1x.checked = false;
-                        scale2x.checked = false;
-                        scale3x.checked = true;
-                        scale4x.checked = false;
-                    }
-                }
-
-                scale4x := MenuItem {
-                    title: @tr("4x");
-                    checkable: true;
-                    checked: scale_factor == 4;
-                    enabled: !auto_scale;
-
-                    activated => {
-                        scale_factor = 4;
-                        scale1x.checked = false;
-                        scale2x.checked = false;
-                        scale3x.checked = false;
-                        scale4x.checked = true;
+                        scale_factor = scale.scale;
+                        clear_scale_selections(scale.scale);
                     }
                 }
             }

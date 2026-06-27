@@ -1,7 +1,6 @@
 use core::ops::Index;
 
 use better_default::Default;
-use bitvec::prelude::*;
 use bytemuck::TransparentWrapper;
 use strum::FromRepr;
 
@@ -114,14 +113,17 @@ pub struct AudioPanning {
 }
 
 impl AudioPanning {
+    #[inline(always)]
     pub fn read(self) -> u8 {
         self.into()
     }
 
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
         *self = value.into();
     }
 
+    #[inline(always)]
     pub fn get<T>(&self, idx: T) -> ChannelPanning
     where
         usize: From<T>,
@@ -225,12 +227,13 @@ pub enum WaveDuty {
 }
 
 impl WaveDuty {
-    pub fn wave(&self) -> [u8; 8] {
+    #[inline(always)]
+    pub fn wave(&self) -> &[u8; 8] {
         match self {
-            Self::Eighth => [0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0, 0x1],
-            Self::Quarter => [0x0, 0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0],
-            Self::Half => [0x0, 0x1, 0x1, 0x1, 0x1, 0x0, 0x0, 0x0],
-            Self::ThreeQuarter => [0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1],
+            Self::Eighth => &[0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0, 0x1],
+            Self::Quarter => &[0x0, 0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0],
+            Self::Half => &[0x0, 0x1, 0x1, 0x1, 0x1, 0x0, 0x0, 0x0],
+            Self::ThreeQuarter => &[0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1],
         }
     }
 }
@@ -245,10 +248,12 @@ pub struct ChannelLengthTimerWithDuty {
 }
 
 impl ChannelLengthTimerWithDuty {
+    #[inline(always)]
     pub fn read(self) -> u8 {
         (self | 0b0011_1111).into()
     }
 
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
         *self = value.into();
     }
@@ -264,6 +269,7 @@ pub enum EnvelopeDirection {
 }
 
 impl From<bool> for EnvelopeDirection {
+    #[inline(always)]
     fn from(value: bool) -> Self {
         match value {
             false => EnvelopeDirection::Decrease,
@@ -273,6 +279,7 @@ impl From<bool> for EnvelopeDirection {
 }
 
 impl From<EnvelopeDirection> for bool {
+    #[inline(always)]
     fn from(value: EnvelopeDirection) -> Self {
         match value {
             EnvelopeDirection::Decrease => false,
@@ -321,85 +328,87 @@ pub struct ChannelPeriodControl {
 }
 
 impl ChannelPeriodControl {
+    #[inline(always)]
     pub fn read(self) -> u16 {
         (self | 0b1011_1111_1111_1111).into()
     }
 
+    #[inline(always)]
     pub fn write(&mut self, value: u16) {
         *self = value.into()
     }
 }
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelDacEnable(#[default(0b11111111)] pub(crate) u8);
+#[bitfield(u8, order = lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
+pub struct ChannelDacEnable {
+    #[bits(7, default = true)]
+    enable: bool,
+    #[bits(0..=6, default = 0xFF)]
+    _unused: u8,
+}
 impl ChannelDacEnable {
-    pub fn read(&self) -> u8 {
-        self.0 | 0b0111_1111
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        (self | 0b0111_1111).into()
     }
 
-    pub fn enable(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[7]
-    }
-    pub fn set_enable(&mut self, value: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(7, value);
-    }
-
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
-        self.0 = value | 0b0111_1111
+        *self = (value | 0b0111_1111).into();
     }
 }
-
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelLengthTimer(#[default(0b11111111)] pub(crate) u8);
+#[bitfield(u8, order = lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
+pub struct ChannelLengthTimer {
+    #[bits(0..=7, default = 0xFF)]
+    length_timer: u8,
+}
 impl ChannelLengthTimer {
-    pub fn read(&self) -> u8 {
+    #[inline(always)]
+    pub fn read(self) -> u8 {
         0b11111111
     }
 
-    pub fn set_length_timer(&mut self, value: u8) {
-        self.0 = value;
-    }
-
-    pub(crate) fn length_timer(&self) -> u8 {
-        self.0
-    }
-
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
-        self.0 = value;
+        *self = value.into();
     }
 }
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelVolume(#[default(0b10111111)] pub(crate) u8);
+#[bitfield(u8, order = lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
+pub struct ChannelVolume {
+    #[bits(0..=4, default = 0xFF)]
+    _unused: u8,
+    #[bits(5..=6)]
+    volume: u8,
+    #[bits(7, default = true)]
+    _unused2: bool,
+}
 impl ChannelVolume {
-    pub fn read(&self) -> u8 {
-        self.0 | 0b10011111
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        (self | 0b10011111).into()
     }
 
+    #[inline(always)]
     pub fn write(&mut self, value: u8) {
-        self.0 = value | 0b10011111;
-    }
-
-    pub fn volume(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[5..=6].load_le()
-    }
-    pub fn set_volume(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[5..=6].store_le(value);
+        *self = (value | 0b10011111).into();
     }
 }
 
-#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy)]
+#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
 #[repr(u8)]
 enum LfsrWidth {
     #[default]
+    #[fallback]
     Fifteen = 0,
     Seven = 1,
 }
 
 impl From<bool> for LfsrWidth {
+    #[inline(always)]
     fn from(value: bool) -> Self {
         match value {
             false => LfsrWidth::Fifteen,
@@ -409,6 +418,7 @@ impl From<bool> for LfsrWidth {
 }
 
 impl From<LfsrWidth> for bool {
+    #[inline(always)]
     fn from(value: LfsrWidth) -> Self {
         match value {
             LfsrWidth::Fifteen => false,
@@ -417,50 +427,45 @@ impl From<LfsrWidth> for bool {
     }
 }
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelFrequencyRandomness(#[default(0b11111111)] pub(crate) u8);
+#[bitfield(u8, order=lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Copy, Clone, PartialEq)]
+pub struct ChannelFrequencyRandomness {
+    #[bits(4..=7, default = 0xFF)]
+    clock_shift: u8,
+    #[bits(3, default = LfsrWidth::Seven)]
+    lfsr_width: LfsrWidth,
+    #[bits(0..=2, default = 0xFF)]
+    clock_divider: u8,
+}
 impl ChannelFrequencyRandomness {
-    pub fn read(&self) -> u8 {
-        self.0
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        self.into()
     }
 
-    pub fn clock_shift(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[4..=7].load_le()
-    }
-    pub fn set_clock_shift(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[4..=7].store_le(value);
-    }
-
-    pub fn lfsr_width(&self) -> LfsrWidth {
-        self.0.view_bits::<Lsb0>()[3].into()
-    }
-
-    pub fn set_lfsr_width(&mut self, value: LfsrWidth) {
-        self.0.view_bits_mut::<Lsb0>().set(3, value.into());
-    }
-
-    pub fn clock_divider(&self) -> u8 {
-        self.0.view_bits::<Lsb0>()[0..=2].load_le()
-    }
-
-    pub fn set_clock_divider(&mut self, value: u8) {
-        self.0.view_bits_mut::<Lsb0>()[0..=2].store_le(value);
+    #[inline(always)]
+    pub fn write(&mut self, value: u8) {
+        *self = value.into();
     }
 }
+#[bitfield(u8, order = lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
+pub struct ChannelControl {
+    #[bits(7, default = true)]
+    trigger: bool,
+    #[bits(6, default = true)]
+    length_enable: bool,
+    #[bits(0..=5, default = 0xFF)]
+    _unused: u8,
+}
 
-#[derive(Default, Debug, TransparentWrapper)]
-#[repr(transparent)]
-pub struct ChannelControl(#[default(0b11111111)] pub(crate) u8);
 impl ChannelControl {
-    pub fn read(&self) -> u8 {
-        self.0 | 0b10111111
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        (self | 0b10111111).into()
     }
-
-    pub fn length_enable(&self) -> bool {
-        self.0.view_bits::<Lsb0>()[6]
-    }
-    pub fn set_length_enable(&mut self, value: bool) {
-        self.0.view_bits_mut::<Lsb0>().set(6, value)
+    #[inline(always)]
+    pub fn write(&mut self, value: u8) {
+        *self = (value | 0b00111111).into();
     }
 }

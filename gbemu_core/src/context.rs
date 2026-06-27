@@ -992,8 +992,7 @@ impl RomInfo {
         let data = data.as_ref();
         let path = path.as_ref();
 
-        let title = str::from_utf8(&data[0x134..=0x143])
-            .unwrap()
+        let title = String::from_utf8_lossy(&data[0x134..0x143])
             .trim_end_matches('\0')
             .to_string();
 

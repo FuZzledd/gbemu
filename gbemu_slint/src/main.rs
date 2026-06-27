@@ -531,6 +531,40 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     ));
 
+    ui.on_clear_scale_selections(using!([ui.as_weak()], move |except_scale| {
+        use slint::Model;
+        let ui = ui.upgrade().unwrap();
+        let scales = ui.get_scales();
+        for (id, mut scale) in scales.iter().enumerate() {
+            if scale.1 != except_scale {
+                scale.0 = false;
+                scales.set_row_data(id, scale);
+            }
+        }
+    }));
+
+    ui.on_step_frame(using!(
+        [
+            gameboy,
+            ui.as_weak(),
+            tile_viewer.as_weak(),
+            tilemap_viewer.as_weak(),
+            playback_controller,
+        ],
+        move || {
+            let ui = ui.upgrade().unwrap();
+            playback_controller.send(false).unwrap();
+            ui.set_paused(true);
+
+            {
+                let mut gameboy = gameboy.lock();
+                while !gameboy.tick(false) {}
+            }
+
+            redraw(&gameboy, &ui.as_weak(), &tile_viewer, &tilemap_viewer);
+        }
+    ));
+
     let keybinds = Rc::new(hash_map! {
         "w" => GameBoyButton::Up,
         "s" => GameBoyButton::Down,
