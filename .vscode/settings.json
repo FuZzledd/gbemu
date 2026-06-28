@@ -1,4 +1,7 @@
 {
     "git.ignoreLimitWarning": true,
-    "git.enabled": false
+    "git.enabled": false,
+    "rust-analyzer.cargo.extraEnv": {
+        "SLINT_ENABLE_EXPERIMENTAL_FEATURES": "1"
+    }
 }

@@ -3,7 +3,8 @@
 use gbemu_core::{GameBoy, ppu};
 use image::ImageFormat::Png;
 use rgb::Gray;
-use std::{hash_map, path::Path};
+use std::path::Path;
+use tap::Tap;
 
 mod common;
 
@@ -12,14 +13,13 @@ mod common;
 fn test_dmg_acid2() {
     let mut gameboy: GameBoy = GameBoy::default();
 
-    let palette = hash_map! {
-        ppu::Pixel::White => Gray::new(0xFF).into(),
-        ppu::Pixel::LightGray => Gray::new(0xAA).into(),
-        ppu::Pixel::DarkGrey => Gray::new(0x55).into(),
-        ppu::Pixel::Black => Gray::new(0x00).into(),
-    };
-
-    gameboy.palette = palette;
+    gameboy.palette.tap_mut(|palette| {
+        use ppu::Pixel::*;
+        palette[White] = Gray::new(0xFF).into();
+        palette[LightGray] = Gray::new(0xAA).into();
+        palette[DarkGrey] = Gray::new(0x55).into();
+        palette[Black] = Gray::new(0x00).into();
+    });
 
     gameboy.load_rom(Path::new("../../test_roms/dmg_acid2/dmg-acid2.gb"));
 

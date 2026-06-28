@@ -3,41 +3,54 @@
 #![feature(uint_gather_scatter_bits)]
 #![feature(hash_map_macro)]
 
-use core::{array, time::Duration};
+use core::{
+    mem,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     BufferSize,
 };
 
-use dasp::{Frame, Signal};
+use crossbeam::channel;
+use dasp::{
+    interpolate::{linear::Linear, sinc::Sinc},
+    ring_buffer::Fixed,
+    signal::interpolate::Converter,
+    Frame, Signal,
+};
 use etcetera::{AppStrategy, AppStrategyArgs};
 use gbemu_core::{
     context::{InterruptRegister, Io, Memory},
     ppu::Pixel,
-    GameBoy, GameBoyButton,
+    GameBoy, GameBoyButton, PLAYING,
 };
-use image24::ImageEncoder;
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use png_achunk::{Chunk, ChunkType};
 use ringbuf::traits::Consumer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use parking_lot::{Mutex, RwLock};
+use rayon::prelude::*;
 use slint::{
+    language::KeyEvent,
+    platform::Key,
     quit_event_loop,
     CloseRequestResponse::{self},
-    Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Weak,
+    ComponentHandle, Global, Image, Keys, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer,
+    SharedString, ToSharedString, Weak,
 };
 use std::{
     collections::VecDeque,
     env,
     error::Error,
-    fs::File,
-    io::{BufReader, Read},
+    io::Read,
     path::{Path, PathBuf},
     process::exit,
     rc::Rc,
+    sync::{LazyLock, OnceLock},
     thread,
     time::Instant,
 };
@@ -51,6 +64,18 @@ use uzi::using;
 
 use slint_generated::*;
 
+use crate::util::ShortcutsModel;
+
+mod util;
+
+#[derive(Default, Debug)]
+struct WindowStatus {
+    tile_viewer: AtomicBool,
+    tilemap_viewer: AtomicBool,
+}
+
+static WINDOWS_ACTIVE: LazyLock<WindowStatus> = LazyLock::new(Default::default);
+
 fn set_recent(ui: &mut AppWindow, recent: &IndexSet<PathBuf>) {
     ui.set_recent(ModelRc::from(
         recent
@@ -63,6 +88,30 @@ fn set_recent(ui: &mut AppWindow, recent: &IndexSet<PathBuf>) {
             .collect::<Vec<_>>()
             .as_slice(),
     ));
+}
+
+fn get_keys_from_keyevent(event: KeyEvent) -> Keys {
+    println!("{:?}", event.text);
+    let mut keys = vec![];
+    if event.modifiers.control {
+        keys.push("Control");
+    }
+    if event.modifiers.alt {
+        keys.push("Alt");
+    }
+    if event.modifiers.shift {
+        keys.push("Shift");
+    }
+    let key = match event.text.as_str() {
+        "\t" => "Tab",
+        "\n" => "Return",
+        " " => "Space",
+        key => key,
+    };
+    keys.push(key);
+    Keys::from_parts(keys)
+        .inspect_err(|e| println!("{}", e))
+        .unwrap_or_default()
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -157,15 +206,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let mut signal =
-        GBSignal::create(gameboy.lock().apu.output_channel.1.clone()).into_interleaved_samples();
+    let mut signal = GBSignal::create(gameboy.lock().apu.output_channel.1.clone());
 
     let stream = device
         .build_output_stream(
             stream_config,
             using!([], move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                for sample in data.iter_mut() {
-                    *sample = signal.next_sample();
+                for sample in data.as_chunks_mut::<2>().0.iter_mut() {
+                    *sample = signal.next();
                 }
             }),
             move |err| {
@@ -203,9 +251,73 @@ fn main() -> Result<(), Box<dyn Error>> {
     let ui_handle = ui.as_weak();
 
     let tile_viewer = TileViewer::new()?;
-    let _tile_viewer_handle = tile_viewer.as_weak();
 
     let tilemap_viewer = TileMapViewer::new()?;
+
+    let settings_window = SettingsWindow::new()?;
+
+    let keyboard_shortcuts = ModelRc::new(ShortcutsModel::from(IndexMap::from([
+        (
+            "load_rom".to_string(),
+            ShortcutEntry {
+                name: "Open ROM".to_shared_string(),
+                shortcut: Keys::from_parts(["Control", "O"]).unwrap(),
+            },
+        ),
+        (
+            "pause".to_string(),
+            ShortcutEntry {
+                name: "Pause".to_shared_string(),
+                shortcut: Keys::from_parts(["Control", "P"]).unwrap(),
+            },
+        ),
+        (
+            "step_tick".to_string(),
+            ShortcutEntry {
+                name: "Step Tick".to_shared_string(),
+                shortcut: Keys::from_parts(["Control", "T"]).unwrap(),
+            },
+        ),
+        (
+            "step_frame".to_string(),
+            ShortcutEntry {
+                name: "Step Frame".to_shared_string(),
+                shortcut: Keys::from_parts(["Control", "S"]).unwrap(),
+            },
+        ),
+        (
+            "fullscreen".to_string(),
+            ShortcutEntry {
+                name: "Fullscreen".to_shared_string(),
+                shortcut: Keys::from_parts(["Alt", "Return"]).unwrap(),
+            },
+        ),
+    ])));
+
+    fn setup_key_helpers<'a, T: ComponentHandle>(
+        keyboard_shortcuts: ModelRc<(ShortcutEntry, SharedString)>,
+        window: &'a T,
+    ) where
+        KeyHelpers<'a>: Global<'a, T>,
+    {
+        let key_helpers = window.global::<KeyHelpers>();
+        key_helpers.on_get_keys_from_keyevent(get_keys_from_keyevent);
+        key_helpers.on_get_keyboard_shortcut(using!([keyboard_shortcuts], move |name| {
+            let shortcuts = keyboard_shortcuts
+                .as_any()
+                .downcast_ref::<ShortcutsModel>()
+                .expect("Should be a shortcuts model");
+            shortcuts.get(&name.to_string()).unwrap_or_default()
+        }));
+        key_helpers.set_keyboard_shortcuts(keyboard_shortcuts.clone());
+    }
+
+    setup_key_helpers(keyboard_shortcuts.clone(), &ui);
+    setup_key_helpers(keyboard_shortcuts.clone(), &settings_window);
+
+    ui.on_show_settings(using!([settings_window.as_weak()], move || {
+        settings_window.upgrade().unwrap().show().unwrap();
+    }));
 
     tile_viewer
         .window()
@@ -235,6 +347,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     ui.on_toggle_tile_viewer(using!([ui_handle, tile_viewer.as_weak()], move || {
         let tile_viewer_shown = ui_handle.upgrade().unwrap().get_tile_viewer_shown();
         let tile_viewer = tile_viewer.upgrade().unwrap();
+        WINDOWS_ACTIVE
+            .tile_viewer
+            .store(tile_viewer_shown, Ordering::Relaxed);
         if tile_viewer_shown {
             tile_viewer.show().unwrap();
         } else {
@@ -245,6 +360,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     ui.on_toggle_tilemap_viewer(using!([ui_handle, tilemap_viewer.as_weak()], move || {
         let tilemap_viewer_shown = ui_handle.upgrade().unwrap().get_tilemap_viewer_shown();
         let tilemap_viewer = tilemap_viewer.upgrade().unwrap();
+        WINDOWS_ACTIVE
+            .tilemap_viewer
+            .store(tilemap_viewer_shown, Ordering::Relaxed);
         if tilemap_viewer_shown {
             tilemap_viewer.show().unwrap();
         } else {
@@ -293,8 +411,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             .expect("Couldn't write image file");
     }));
 
-    let (playback_controller, playback_receiver) = crossbeam::channel::bounded::<bool>(10);
-
     let (redraw_sender, redraw_receiver) = crossbeam::channel::bounded::<()>(1);
 
     thread::spawn(using!(
@@ -307,11 +423,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         move || {
             loop {
                 if redraw_receiver.recv().is_ok() {
-                    redraw(&gameboy, &ui, &tile_viewer, &tilemap_viewer);
+                    update_viewers(&gameboy, &tile_viewer, &tilemap_viewer);
                 }
             }
         }
     ));
+
+    let mut image_buffer = SharedPixelBuffer::new(160, 144);
+    let mut local_buffer = SharedPixelBuffer::new(160, 144);
 
     thread::spawn(using!(
         [
@@ -322,24 +441,39 @@ fn main() -> Result<(), Box<dyn Error>> {
             tilemap_viewer.as_weak()
         ],
         move || {
-            let mut is_playing = false;
             let mut prev_frame_time = Instant::now();
             loop {
-                if !is_playing {
-                    let playback_status = playback_receiver.recv();
-                    is_playing = playback_status.unwrap();
-                } else {
-                    if let Ok(playback_status) = playback_receiver.try_recv() {
-                        is_playing = playback_status;
-                    }
-
+                if PLAYING.load(Ordering::Relaxed) {
                     let target_time = Instant::now() + Duration::from_secs_f64(1.0 / 59.73);
                     loop {
-                        let redraw_request = gameboy.lock().tick(false);
+                        let mut gameboy = gameboy.lock();
+                        let redraw_request = gameboy.tick(false);
                         if redraw_request {
                             let delta_time =
                                 prev_frame_time.elapsed().as_secs_f32().max(1.0 / 59.73);
+
+                            let palette = &gameboy.palette;
+                            let buffer = local_buffer.make_mut_slice();
+                            gameboy
+                                .get_screen()
+                                .par_iter()
+                                .map(|pixel| palette[pixel].conv::<[u8; 4]>())
+                                .zip(buffer.par_iter_mut())
+                                .for_each(|(pixel, buffer_pixel)| {
+                                    *buffer_pixel = pixel.into();
+                                });
+
+                            mem::swap(&mut local_buffer, &mut image_buffer);
+
+                            ui_handle
+                                .upgrade_in_event_loop(using!([image_buffer], move |handle| {
+                                    handle.set_screen(Image::from_rgba8(image_buffer));
+                                    handle.window().request_redraw();
+                                }))
+                                .unwrap();
                             redraw_sender.send(()).unwrap();
+
+                            // rate_sender.send(delta_time * 59.73).unwrap();
                             ui_handle
                                 .upgrade_in_event_loop(move |handle| {
                                     handle.set_fps(1.0 / delta_time);
@@ -348,7 +482,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             prev_frame_time = Instant::now();
                             break;
                         }
-                        for byte in gameboy.lock().context.memory.io.serial.output.pop_iter() {
+                        for byte in gameboy.context.memory.io.serial.output.pop_iter() {
                             println!("0x{byte:02X}");
                         }
                     }
@@ -362,13 +496,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     ));
 
     ui.on_load_rom(using!(
-        [
-            gameboy,
-            ui.as_weak(),
-            playback_controller,
-            recent,
-            recent_path
-        ],
+        [gameboy, ui.as_weak(), recent, recent_path],
         move || {
             let Some(rom_path) = rfd::FileDialog::new()
                 .add_filter("GameBoy ROMs (.gb/.gbc)", &["gb"])
@@ -407,9 +535,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             recent_writer.flush().unwrap();
             gameboy.load_rom(rom_path);
 
-            ui.upgrade_in_event_loop(using!([playback_controller, recent], move |mut handle| {
+            ui.upgrade_in_event_loop(using!([recent], move |mut handle| {
                 handle.set_paused(false);
-                playback_controller.send(true).unwrap();
+                PLAYING.store(true, Ordering::Relaxed);
                 set_recent(&mut handle, &recent.read());
                 handle.invoke_focus();
             }))
@@ -418,13 +546,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     ));
 
     ui.on_load_recent(using!(
-        [
-            gameboy,
-            ui.as_weak(),
-            recent,
-            playback_controller,
-            recent_path
-        ],
+        [gameboy, ui.as_weak(), recent, recent_path],
         move |index| {
             let gameboy = &mut *gameboy.lock();
 
@@ -450,9 +572,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             gameboy.load_rom(rom_path);
 
-            ui.upgrade_in_event_loop(using!([playback_controller, recent], move |mut handle| {
+            ui.upgrade_in_event_loop(using!([recent], move |mut handle| {
                 handle.set_paused(false);
-                playback_controller.send(true).unwrap();
+                PLAYING.store(true, Ordering::Relaxed);
                 set_recent(&mut handle, &recent.read());
                 handle.invoke_focus();
             }))
@@ -461,13 +583,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     ));
 
     ui.on_dropped(using!(
-        [
-            gameboy,
-            ui.as_weak(),
-            recent,
-            recent_path,
-            playback_controller
-        ],
+        [gameboy, ui.as_weak(), recent, recent_path,],
         move |drop_event| {
             let file_url = drop_event.data.plain_text().unwrap();
 
@@ -492,9 +608,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             gameboy.load_rom(rom_path);
 
-            ui.upgrade_in_event_loop(using!([playback_controller, recent], move |mut handle| {
+            ui.upgrade_in_event_loop(using!([recent], move |mut handle| {
                 handle.set_paused(false);
-                playback_controller.send(true).unwrap();
+                PLAYING.store(true, Ordering::Relaxed);
                 set_recent(&mut handle, &recent.read());
                 handle.invoke_focus();
             }))
@@ -504,9 +620,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     ));
 
-    ui.on_toggle_playback(using!([ui.as_weak(), playback_controller], move || {
+    ui.on_toggle_playback(using!([ui.as_weak()], move || {
         let ui = ui.upgrade().unwrap();
-        playback_controller.send(!ui.get_paused()).unwrap();
+        PLAYING.store(!ui.get_paused(), Ordering::Relaxed);
     }));
 
     ui.on_step_tick(using!(
@@ -515,11 +631,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             ui.as_weak(),
             tile_viewer.as_weak(),
             tilemap_viewer.as_weak(),
-            playback_controller,
         ],
         move || {
             let ui = ui.upgrade().unwrap();
-            playback_controller.send(false).unwrap();
+            PLAYING.store(false, Ordering::Relaxed);
             ui.set_paused(true);
 
             {
@@ -527,7 +642,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 gameboy.tick(true);
             }
 
-            redraw(&gameboy, &ui.as_weak(), &tile_viewer, &tilemap_viewer);
+            update_viewers(&gameboy, &tile_viewer, &tilemap_viewer);
         }
     ));
 
@@ -549,19 +664,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             ui.as_weak(),
             tile_viewer.as_weak(),
             tilemap_viewer.as_weak(),
-            playback_controller,
         ],
         move || {
             let ui = ui.upgrade().unwrap();
-            playback_controller.send(false).unwrap();
+            PLAYING.store(true, Ordering::Relaxed);
             ui.set_paused(true);
 
             {
                 let mut gameboy = gameboy.lock();
                 while !gameboy.tick(false) {}
             }
+            PLAYING.store(false, Ordering::Relaxed);
 
-            redraw(&gameboy, &ui.as_weak(), &tile_viewer, &tilemap_viewer);
+            update_viewers(&gameboy, &tile_viewer, &tilemap_viewer);
         }
     ));
 
@@ -602,72 +717,115 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn redraw(
+fn update_viewers(
     gameboy: &Arc<Mutex<GameBoy>>,
-    ui_handle: &Weak<AppWindow>,
     tile_viewer_handle: &Weak<TileViewer>,
     tilemap_viewer_handle: &Weak<TileMapViewer>,
 ) {
     let gameboy = gameboy.lock();
-
-    let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&gameboy.buffer, 160, 144);
-
-    let tiles: Vec<_> = gameboy
+    let palette = gameboy.palette;
+    let bgp = gameboy.context.memory.io.lcd.bgp;
+    let mapping = gameboy.context.memory.io.lcd.lcdc.tile_data_mapping();
+    let (scroll_x, scroll_y) = gameboy
         .context
         .memory
-        .vram
-        .tile_data()
-        .pipe(|data| data.as_chunks::<16>().0)
-        .iter()
-        .map(|x| {
-            SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                &x.pipe(|data| data.as_chunks::<2>().0)
-                    .iter()
-                    .copied()
-                    .flat_map(|[left, right]| {
-                        let row = ((left as u16) << 8) | right as u16;
-                        (0..8)
-                            .map(move |index| row.extract_bits(0b1000_0000_1000_0000 >> index))
-                            .map(|colour| gameboy.context.memory.io.lcd.bgp >> (colour * 2) & 0b11)
-                            .flat_map(|colour| {
-                                gameboy.palette[&Pixel::from_repr(colour).unwrap()]
-                                    .conv::<[u8; 4]>()
+        .io
+        .lcd
+        .pipe_ref(|lcd| (lcd.scx, lcd.scy));
+    let tile_data = gameboy.context.memory.vram.tile_data().to_vec();
+
+    if WINDOWS_ACTIVE.tilemap_viewer.load(Ordering::Relaxed) {
+        let tile_maps = [
+            gameboy.context.memory.io.lcd.lcdc.bg_tile_map(),
+            gameboy.context.memory.io.lcd.lcdc.window_tile_map(),
+        ]
+        .map(|map_area| {
+            gameboy
+                .context
+                .memory
+                .vram
+                .tile_map(map_area)
+                .iter()
+                .copied()
+                .map(|tile_id| *gameboy.context.memory.vram.bg_tile_data(mapping, tile_id))
+                .collect_vec()
+        });
+
+        drop(gameboy);
+
+        let tile_maps = tile_maps.map(|map| {
+            map.iter()
+                .map(|tile| {
+                    SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                        &tile
+                            .pipe(|data| data.as_chunks::<2>().0)
+                            .iter()
+                            .copied()
+                            .flat_map(|[left, right]| {
+                                let row = ((left as u16) << 8) | right as u16;
+                                (0..8)
+                                    .map(move |index| {
+                                        row.extract_bits(0b1000_0000_1000_0000 >> index)
+                                    })
+                                    .map(|colour| bgp >> (colour * 2) & 0b11)
+                                    .flat_map(|colour| {
+                                        palette[&Pixel::from_repr(colour).unwrap()]
+                                            .conv::<[u8; 4]>()
+                                    })
                             })
-                    })
-                    .collect::<Vec<_>>(),
-                8,
-                8,
-            )
-        })
-        .collect();
+                            .collect::<Vec<_>>(),
+                        8,
+                        8,
+                    )
+                })
+                .collect_vec()
+        });
 
-    let mapping = gameboy.context.memory.io.lcd.lcdc.tile_data_mapping();
-    let tile_maps = [
-        gameboy.context.memory.io.lcd.lcdc.bg_tile_map(),
-        gameboy.context.memory.io.lcd.lcdc.window_tile_map(),
-    ]
-    .map(|map_area| {
-        let map = gameboy.context.memory.vram.tile_map(map_area);
-        map.iter()
-            .copied()
-            .map(|tile_id| {
-                let tile = gameboy.context.memory.vram.bg_tile_data(mapping, tile_id);
+        tilemap_viewer_handle
+            .upgrade_in_event_loop(move |handle| {
+                let tiles = match handle.get_selected_map() {
+                    TileMap::Background => &tile_maps[0],
+                    TileMap::Window => &tile_maps[1],
+                };
 
+                let model = ModelRc::from(
+                    tiles
+                        .iter()
+                        .cloned()
+                        .enumerate()
+                        .map(|(index, buffer)| Tile {
+                            index: index as i32,
+                            buffer: Image::from_rgba8(buffer),
+                        })
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                );
+                handle.set_tiles(model);
+                handle.set_scroll(if handle.get_selected_map() == TileMap::Background {
+                    (scroll_x as f32, scroll_y as f32)
+                } else {
+                    (0.0, 0.0)
+                });
+            })
+            .unwrap();
+    }
+
+    if WINDOWS_ACTIVE.tile_viewer.load(Ordering::Relaxed) {
+        let tiles: Vec<_> = tile_data
+            .pipe_ref(|data| data.as_chunks::<16>().0)
+            .par_iter()
+            .map(|x| {
                 SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                    &tile
-                        .pipe(|data| data.as_chunks::<2>().0)
+                    &x.pipe(|data| data.as_chunks::<2>().0)
                         .iter()
                         .copied()
                         .flat_map(|[left, right]| {
                             let row = ((left as u16) << 8) | right as u16;
                             (0..8)
                                 .map(move |index| row.extract_bits(0b1000_0000_1000_0000 >> index))
-                                .map(|colour| {
-                                    gameboy.context.memory.io.lcd.bgp >> (colour * 2) & 0b11
-                                })
+                                .map(|colour| bgp >> (colour * 2) & 0b11)
                                 .flat_map(|colour| {
-                                    gameboy.palette[&Pixel::from_repr(colour).unwrap()]
-                                        .conv::<[u8; 4]>()
+                                    palette[&Pixel::from_repr(colour).unwrap()].conv::<[u8; 4]>()
                                 })
                         })
                         .collect::<Vec<_>>(),
@@ -675,66 +833,23 @@ fn redraw(
                     8,
                 )
             })
-            .collect_vec()
-    });
-    let (scroll_x, scroll_y) = gameboy
-        .context
-        .memory
-        .io
-        .lcd
-        .pipe_ref(|lcd| (lcd.scx, lcd.scy));
+            .collect();
 
-    drop(gameboy);
-
-    tilemap_viewer_handle
-        .upgrade_in_event_loop(move |handle| {
-            let tiles = match handle.get_selected_map() {
-                TileMap::Background => &tile_maps[0],
-                TileMap::Window => &tile_maps[1],
-            };
-
-            let model = ModelRc::from(
-                tiles
-                    .iter()
-                    .cloned()
-                    .enumerate()
-                    .map(|(index, buffer)| Tile {
-                        index: index as i32,
-                        buffer: Image::from_rgba8(buffer),
-                    })
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            );
-            handle.set_tiles(model);
-            handle.set_scroll(if handle.get_selected_map() == TileMap::Background {
-                (scroll_x as f32, scroll_y as f32)
-            } else {
-                (0.0, 0.0)
-            });
-        })
-        .unwrap();
-
-    ui_handle
-        .upgrade_in_event_loop(move |handle| {
-            handle.set_screen(Image::from_rgba8(buffer));
-            handle.window().request_redraw();
-        })
-        .unwrap();
-
-    tile_viewer_handle
-        .upgrade_in_event_loop(move |handle| {
-            let model = ModelRc::from(
-                tiles
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, buffer)| Tile {
-                        index: index as i32,
-                        buffer: Image::from_rgba8(buffer),
-                    })
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            );
-            handle.set_tiles(model);
-        })
-        .unwrap();
+        tile_viewer_handle
+            .upgrade_in_event_loop(move |handle| {
+                let model = ModelRc::from(
+                    tiles
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, buffer)| Tile {
+                            index: index as i32,
+                            buffer: Image::from_rgba8(buffer),
+                        })
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                );
+                handle.set_tiles(model);
+            })
+            .unwrap();
+    }
 }

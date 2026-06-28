@@ -1,0 +1,112 @@
+import {
+    AboutSlint,
+    VerticalBox,
+    GridBox,
+    CheckBox,
+    GroupBox,
+    Slider,
+    RadioGroup,
+    TabWidget,
+    Button,
+    HorizontalBox,
+} from "std-widgets.slint";
+
+
+export struct ShortcutEntry { name: string, shortcut: keys }
+
+export global KeyHelpers {
+    pure callback get_keys_from_keyevent(KeyEvent) -> keys;
+    in-out property <[{ key: string, data: ShortcutEntry }]> keyboard_shortcuts;
+    pure callback get_keyboard_shortcut(string) -> int;
+}
+
+export component SettingsWindow inherits Window {
+    min-width: 400px;
+    min-height: 400px;
+    title: @tr("Settings");
+    in-out property <[{ key: string, data: ShortcutEntry }]> keyboard_shortcuts <=> KeyHelpers.keyboard_shortcuts;
+
+    TabWidget {
+        Tab {
+            title: @tr("Keyboard");
+            root_container := Rectangle {
+                x: 0;
+                y: 0;
+                width: root.width;
+                FlexboxLayout {
+                    padding: 10px;
+                    width: 100%;
+                    flex-direction: row;
+                    cross-axis-alignment: start;
+                    alignment: space-around;
+                    align-content: start;
+                    flex-wrap: wrap;
+                    spacing-horizontal: 5px;
+                    for shortcut in keyboard_shortcuts: Rectangle {
+                        preferred-width: root_container.width / 2.0 - 30px;
+                        HorizontalBox {
+                            width: 100%;
+                            height: 20px;
+                            padding: 4px;
+                            alignment: space-between;
+                            cross-axis-alignment: center;
+                            in-out property <{ key: string, data: ShortcutEntry }> shortcut_data <=> shortcut;
+
+                            Text {
+                                text <=> shortcut_data.data.name;
+                            }
+
+                            button_scope := FocusScope {
+                                width: 100px;
+                                in-out property <bool> waiting: false;
+                                private property <int> countdown;
+                                timer := Timer {
+                                    interval: 1s;
+                                    running: false;
+                                    triggered() => {
+                                        countdown -= 1;
+                                        if countdown == 0 {
+                                            self.running = false;
+                                            waiting = false;
+                                        }
+                                    }
+                                }
+
+                                button := Button {
+                                    width: 100px;
+                                    text: {
+                                        if waiting {
+                                            ".." + countdown + ".."
+                                        }
+                                        else {
+                                            shortcut_data.data.shortcut == @keys() ? "(None)" : shortcut_data.data.shortcut.to-string()
+                                        }
+                                    }
+                                    clicked => { waiting = true; timer.running = true; countdown = 3; button_scope.focus() }
+                                }
+
+                                key-pressed(event) => {
+                                    if waiting {
+                                        if !event.repeat {
+                                            if event.text == Key.Control || event.text == Key.Shift || event.text == Key.Alt {
+                                                return accept;
+                                            }
+                                            shortcut_data.data.shortcut = KeyHelpers.get_keys_from_keyevent(event);
+                                            waiting = false;
+                                            timer.running = false;
+                                        }
+                                    }
+                                    accept
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Tab {
+            title: @tr("Core");
+        }
+    }
+}

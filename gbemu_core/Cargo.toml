@@ -30,6 +30,7 @@ log = { workspace = true }
 parking_lot = { workspace = true }
 paste = { workspace = true }
 png-achunk.workspace = true
+rayon.workspace = true
 rgb = { workspace = true }
 ringbuf = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

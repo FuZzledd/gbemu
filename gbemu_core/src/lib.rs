@@ -1,13 +1,17 @@
 #![feature(uint_gather_scatter_bits)]
 #![feature(hash_map_macro)]
 
-use core::ops::{BitAnd, BitOr, Not, Shl, Shr};
+use core::{
+    borrow::Borrow,
+    ops::{BitAnd, BitOr, Index, IndexMut, Not, Shl, Shr},
+    sync::atomic::{AtomicBool, Ordering},
+};
 use std::{collections::HashMap, path::Path, sync::LazyLock};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use crossbeam::channel::{Receiver, Sender};
 use rgb::Rgba;
-use tap::Conv;
+use tap::{Conv, Pipe, Tap};
 use tracing::instrument;
 
 use crate::{
@@ -16,8 +20,11 @@ use crate::{
     cpu::CPU,
     ppu::{Mode, PPU, Pixel},
 };
+use rayon::prelude::*;
 
 use std::hash_map;
+
+pub static PLAYING: AtomicBool = AtomicBool::new(false);
 
 pub mod apu;
 pub mod context;
@@ -72,8 +79,24 @@ pub enum GameBoyButton {
     Down,
 }
 
-static PLAYBACK_CONTROLLER: LazyLock<(Sender<bool>, Receiver<bool>)> =
-    LazyLock::new(crossbeam::channel::unbounded);
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Palette {
+    inner: [Rgba<u8>; 4],
+}
+
+impl<T: Borrow<Pixel>> IndexMut<T> for Palette {
+    fn index_mut(&mut self, index: T) -> &mut Self::Output {
+        &mut self.inner[*index.borrow() as usize]
+    }
+}
+
+impl<T: Borrow<Pixel>> Index<T> for Palette {
+    type Output = Rgba<u8>;
+
+    fn index(&self, index: T) -> &Self::Output {
+        &self.inner[*index.borrow() as usize]
+    }
+}
 
 pub struct GameBoy {
     pub buffer: BytesMut,
@@ -82,21 +105,15 @@ pub struct GameBoy {
     pub ppu: ppu::PPU,
     pub apu: apu::APU,
     pub counter: u64,
-    pub palette: HashMap<Pixel, Rgba<u8>>,
-    pub playback_receiver: Receiver<bool>,
-    pub playing: bool,
+    pub palette: Palette,
 }
 
 impl GameBoy {
     #[instrument(skip_all)]
     pub fn tick(&mut self, manual: bool) -> bool {
-        if let Ok(status) = self.playback_receiver.try_recv() {
-            self.playing = status;
-        }
-        if !self.playing && !manual {
+        if !PLAYING.load(Ordering::Relaxed) && !manual {
             return false || manual;
         }
-
         if self.counter.is_multiple_of(4) {
             self.cpu.tick(&mut self.context);
             self.context.memory.tick_oam_dma();
@@ -117,16 +134,13 @@ impl GameBoy {
             && self.ppu.cycle_counter == 0)
             || manual
         {
-            self.buffer = self
-                .ppu
-                .screen
-                .iter()
-                .flat_map(|pixel| self.palette[pixel].conv::<[u8; 4]>())
-                .collect();
-
             return true;
         }
         false
+    }
+
+    pub fn get_screen(&self) -> &[Pixel; 23040] {
+        &self.ppu.screen
     }
 
     pub fn set_joypad_state(&mut self, button: GameBoyButton, state: bool) {
@@ -170,19 +184,18 @@ impl Default for GameBoy {
         let ppu = ppu::PPU::default();
         let apu = apu::APU::default();
 
-        let playback_receiver = PLAYBACK_CONTROLLER.1.clone();
-
         let mut buffer = BytesMut::zeroed(160 * 144 * 4);
         for pixel in buffer.as_chunks_mut::<4>().0 {
             pixel[3] = 0xFF
         }
 
-        let palette = hash_map! {
-            ppu::Pixel::White => [220, 220, 220, 255].into(),
-            ppu::Pixel::LightGray => [160, 160, 160, 255].into(),
-            ppu::Pixel::DarkGrey => [80, 80, 80, 255].into(),
-            ppu::Pixel::Black => [0, 0, 0, 255].into(),
-        };
+        let palette = Palette::default().tap_mut(|palette| {
+            use ppu::Pixel::*;
+            palette[White] = [220, 220, 220, 255].into();
+            palette[LightGray] = [160, 160, 160, 255].into();
+            palette[DarkGrey] = [80, 80, 80, 255].into();
+            palette[Black] = [0, 0, 0, 255].into();
+        });
 
         Self {
             buffer,
@@ -192,8 +205,6 @@ impl Default for GameBoy {
             apu,
             counter: 0,
             palette,
-            playback_receiver,
-            playing: true,
         }
     }
 }

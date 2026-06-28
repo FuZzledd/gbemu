@@ -23,6 +23,7 @@ codegen-backend = "llvm"
 inherits = "release"
 incremental = true
 debug = true
+strip = "none"
 
 [profile.profiling.package."*"]
 codegen-backend = "llvm"

@@ -2,6 +2,9 @@ import { Button, VerticalBox, Palette } from "std-widgets.slint";
 
 export { TileViewer }from "tile-viewer.slint";
 export { TileMapViewer }from "tilemap-viewer.slint";
+export { SettingsWindow, KeyHelpers, ShortcutEntry }from "settings.slint";
+
+import { KeyHelpers } from "settings.slint";
 
 enum KeyEventType { press, release }
 
@@ -21,6 +24,7 @@ export component AppWindow inherits Window {
 
     callback embed_rom();
 
+    callback show_settings();
     callback toggle_tile_viewer();
     callback toggle_tilemap_viewer();
     callback toggle_memory_viewer();
@@ -86,7 +90,6 @@ export component AppWindow inherits Window {
 
     key-handler := FocusScope {
         focus-lost(reason) => {
-            debug("Lost focus ", reason);
         }
 
         capture-key-pressed(event) => {
@@ -122,11 +125,12 @@ export component AppWindow inherits Window {
         Menu {
             title: @tr("File");
             MenuItem {
-                title: @tr("Load ROM");
+                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("load_rom")].data;
+                title: data.name;
+                shortcut: data.shortcut;
                 activated => {
                     load_rom()
                 }
-                shortcut: @keys(Control + O);
             }
 
             Menu {
@@ -147,29 +151,32 @@ export component AppWindow inherits Window {
         Menu {
             title: @tr("Playback");
             MenuItem {
-                title: @tr("Paused");
+                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("pause")].data;
+                title: data.name;
+                shortcut: data.shortcut;
                 checkable: true;
                 checked <=> paused;
                 activated => {
                     toggle_playback()
                 }
-                shortcut: @keys(Control + P);
             }
 
             MenuItem {
-                title: @tr("Step Tick");
+                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("step_tick")].data;
+                title: data.name;
+                shortcut: data.shortcut;
                 activated => {
                     step_tick()
                 }
-                shortcut: @keys(Control + T);
             }
 
             MenuItem {
-                title: @tr("Step Frame");
+                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("step_frame")].data;
+                title: data.name;
+                shortcut: data.shortcut;
                 activated => {
                     step_frame()
                 }
-                shortcut: @keys(Control + S);
             }
         }
 
@@ -184,8 +191,9 @@ export component AppWindow inherits Window {
             }
 
             MenuItem {
-                title: @tr("Fullscreen");
-                shortcut: @keys(Alt + Return);
+                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("fullscreen")].data;
+                title: data.name;
+                shortcut: data.shortcut;
                 checkable: true;
                 checked <=> root.full-screen;
                 activated => {
@@ -220,6 +228,13 @@ export component AppWindow inherits Window {
 
         Menu {
             title: @tr("Tools");
+
+            MenuItem {
+                title: @tr("Settings");
+                activated => show_settings();
+            }
+
+            MenuSeparator { }
 
             MenuItem {
                 title: @tr("Embed ROM in PNG");
