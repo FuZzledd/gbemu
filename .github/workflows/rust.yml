@@ -47,7 +47,7 @@ jobs:
         toolchain: "nightly"
     - uses: ConorMacBride/install-package@v1
       with:
-        apt: libfontconfig-dev libpipewire-0.3-dev libjack-jackd2-dev libpulse-dev qt6-base-dev
+        apt: libfontconfig-dev libpipewire-0.3-dev libjack-jackd2-dev libpulse-dev qt6-base-dev libasound2-dev
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build -p gbemu_slint --verbose --release
