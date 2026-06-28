@@ -45,6 +45,9 @@ jobs:
       with:
         # Rust toolchain specification -- see https://rust-lang.github.io/rustup/concepts/toolchains.html#toolchain-specification
         toolchain: "nightly"
+    - uses: ConorMacBride/install-package@v1
+      with:
+        apt: libfontconfig-dev
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build -p gbemu_slint --verbose --release
