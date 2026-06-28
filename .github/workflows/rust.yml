@@ -36,4 +36,23 @@ jobs:
         paths: "target/nextest/ci/junit.xml"
         show: "all"
         folded: true
-        
+  build-release-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: rui314/setup-mold@v1
+    - uses: actions-use/setup-rust@stable
+      with:
+        # Rust toolchain specification -- see https://rust-lang.github.io/rustup/concepts/toolchains.html#toolchain-specification
+        toolchain: "nightly"
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build -p gbemu_slint --verbose --release
+    - name: Upload a Build Artifact
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: gbemu
+        path: ./target/release/gbemu_slint
+    
+      
+      
