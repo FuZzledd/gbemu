@@ -34,6 +34,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
+use rfd::{MessageButtons, MessageLevel};
 use slint::{
     language::KeyEvent,
     platform::Key,
@@ -208,32 +209,29 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut signal = GBSignal::create(gameboy.lock().apu.output_channel.1.clone());
 
-    let stream = device
-        .build_output_stream(
-            stream_config,
-            using!([], move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                for sample in data.as_chunks_mut::<2>().0.iter_mut() {
-                    *sample = signal.next();
-                }
-            }),
-            move |err| {
-                println!("{}", err);
-            },
-            None,
-        )
-        .unwrap();
-    stream.play().unwrap();
+    let stream = device.build_output_stream(
+        stream_config,
+        using!([], move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+            for sample in data.as_chunks_mut::<2>().0.iter_mut() {
+                *sample = signal.next();
+            }
+        }),
+        move |err| {
+            println!("{}", err);
+        },
+        None,
+    )?;
+    stream.play()?;
 
     let strategy = etcetera::app_strategy::choose_native_strategy(AppStrategyArgs {
         top_level_domain: "uk".into(),
         author: "fuzzle".into(),
         app_name: "gbemu".into(),
-    })
-    .unwrap();
+    })?;
 
     let recent_path = strategy.in_data_dir("recent.json");
 
-    fs::create_dir_all(strategy.data_dir()).unwrap();
+    fs::create_dir_all(strategy.data_dir())?;
 
     let recent = Arc::new(RwLock::<IndexSet<_>>::new(
         if let Ok(bytes) = fs::read(recent_path.clone()) {
@@ -248,8 +246,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     set_recent(&mut ui, &recent.read());
 
-    let ui_handle = ui.as_weak();
-
     let tile_viewer = TileViewer::new()?;
 
     let tilemap_viewer = TileMapViewer::new()?;
@@ -261,35 +257,35 @@ fn main() -> Result<(), Box<dyn Error>> {
             "load_rom".to_string(),
             ShortcutEntry {
                 name: "Open ROM".to_shared_string(),
-                shortcut: Keys::from_parts(["Control", "O"]).unwrap(),
+                shortcut: Keys::from_parts(["Control", "O"])?,
             },
         ),
         (
             "pause".to_string(),
             ShortcutEntry {
                 name: "Pause".to_shared_string(),
-                shortcut: Keys::from_parts(["Control", "P"]).unwrap(),
+                shortcut: Keys::from_parts(["Control", "P"])?,
             },
         ),
         (
             "step_tick".to_string(),
             ShortcutEntry {
                 name: "Step Tick".to_shared_string(),
-                shortcut: Keys::from_parts(["Control", "T"]).unwrap(),
+                shortcut: Keys::from_parts(["Control", "T"])?,
             },
         ),
         (
             "step_frame".to_string(),
             ShortcutEntry {
                 name: "Step Frame".to_shared_string(),
-                shortcut: Keys::from_parts(["Control", "S"]).unwrap(),
+                shortcut: Keys::from_parts(["Control", "S"])?,
             },
         ),
         (
             "fullscreen".to_string(),
             ShortcutEntry {
                 name: "Fullscreen".to_shared_string(),
-                shortcut: Keys::from_parts(["Alt", "Return"]).unwrap(),
+                shortcut: Keys::from_parts(["Alt", "Return"])?,
             },
         ),
     ])));
@@ -321,15 +317,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     tile_viewer
         .window()
-        .on_close_requested(using!([ui_handle], move || {
-            ui_handle.upgrade().unwrap().set_tile_viewer_shown(false);
+        .on_close_requested(using!([ui.as_weak()], move || {
+            ui.upgrade().unwrap().set_tile_viewer_shown(false);
             CloseRequestResponse::HideWindow
         }));
 
     tilemap_viewer
         .window()
-        .on_close_requested(using!([ui_handle], move || {
-            ui_handle.upgrade().unwrap().set_tilemap_viewer_shown(false);
+        .on_close_requested(using!([ui.as_weak()], move || {
+            ui.upgrade().unwrap().set_tilemap_viewer_shown(false);
             CloseRequestResponse::HideWindow
         }));
 
@@ -344,8 +340,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         CloseRequestResponse::KeepWindowShown
     }));
 
-    ui.on_toggle_tile_viewer(using!([ui_handle, tile_viewer.as_weak()], move || {
-        let tile_viewer_shown = ui_handle.upgrade().unwrap().get_tile_viewer_shown();
+    ui.on_toggle_tile_viewer(using!([ui.as_weak(), tile_viewer.as_weak()], move || {
+        let tile_viewer_shown = ui.upgrade().unwrap().get_tile_viewer_shown();
         let tile_viewer = tile_viewer.upgrade().unwrap();
         WINDOWS_ACTIVE
             .tile_viewer
@@ -357,20 +353,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }));
 
-    ui.on_toggle_tilemap_viewer(using!([ui_handle, tilemap_viewer.as_weak()], move || {
-        let tilemap_viewer_shown = ui_handle.upgrade().unwrap().get_tilemap_viewer_shown();
-        let tilemap_viewer = tilemap_viewer.upgrade().unwrap();
-        WINDOWS_ACTIVE
-            .tilemap_viewer
-            .store(tilemap_viewer_shown, Ordering::Relaxed);
-        if tilemap_viewer_shown {
-            tilemap_viewer.show().unwrap();
-        } else {
-            tilemap_viewer.hide().unwrap();
+    ui.on_toggle_tilemap_viewer(using!(
+        [ui.as_weak(), tilemap_viewer.as_weak()],
+        move || {
+            let tilemap_viewer_shown = ui.upgrade().unwrap().get_tilemap_viewer_shown();
+            let tilemap_viewer = tilemap_viewer.upgrade().unwrap();
+            WINDOWS_ACTIVE
+                .tilemap_viewer
+                .store(tilemap_viewer_shown, Ordering::Relaxed);
+            if tilemap_viewer_shown {
+                tilemap_viewer.show().unwrap();
+            } else {
+                tilemap_viewer.hide().unwrap();
+            }
         }
-    }));
+    ));
 
-    ui.on_embed_rom(using!([ui_handle], move || {
+    ui.on_embed_rom(using!([], move || {
         let Some(source_image_path) = rfd::FileDialog::new()
             .add_filter("Images (.png)", &["png"])
             .pick_file()
@@ -411,7 +410,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .expect("Couldn't write image file");
     }));
 
-    let (redraw_sender, redraw_receiver) = crossbeam::channel::bounded::<()>(1);
+    let (redraw_sender, redraw_receiver) = crossbeam::channel::unbounded::<()>();
 
     thread::spawn(using!(
         [
@@ -435,7 +434,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     thread::spawn(using!(
         [
             redraw_sender,
-            ui_handle,
+            ui.as_weak(),
             gameboy,
             tile_viewer.as_weak(),
             tilemap_viewer.as_weak()
@@ -465,20 +464,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             mem::swap(&mut local_buffer, &mut image_buffer);
 
-                            ui_handle
-                                .upgrade_in_event_loop(using!([image_buffer], move |handle| {
-                                    handle.set_screen(Image::from_rgba8(image_buffer));
-                                    handle.window().request_redraw();
-                                }))
-                                .unwrap();
+                            ui.upgrade_in_event_loop(using!([image_buffer], move |handle| {
+                                handle.set_screen(Image::from_rgba8(image_buffer));
+                                handle.window().request_redraw();
+                                handle.set_fps(1.0 / delta_time);
+                            }))
+                            .unwrap();
                             redraw_sender.send(()).unwrap();
-
-                            // rate_sender.send(delta_time * 59.73).unwrap();
-                            ui_handle
-                                .upgrade_in_event_loop(move |handle| {
-                                    handle.set_fps(1.0 / delta_time);
-                                })
-                                .unwrap();
                             prev_frame_time = Instant::now();
                             break;
                         }
@@ -514,34 +506,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 return;
             };
 
-            let gameboy = &mut *gameboy.lock();
-            {
-                let mut recent = recent.write();
-                recent.shift_insert(0, rom_path.clone());
-                recent.truncate(5);
-            }
-
-            let mut recent_writer = BufWriter::new(
-                fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(recent_path.clone())
-                    .expect("Couldn't open recent data file"),
-            );
-            recent_writer
-                .write_all(&serde_json::to_vec(&recent.read().as_slice()).unwrap())
-                .unwrap();
-            recent_writer.flush().unwrap();
-            gameboy.load_rom(rom_path);
-
-            ui.upgrade_in_event_loop(using!([recent], move |mut handle| {
-                handle.set_paused(false);
-                PLAYING.store(true, Ordering::Relaxed);
-                set_recent(&mut handle, &recent.read());
-                handle.invoke_focus();
-            }))
-            .unwrap();
+            load_rom(
+                &mut gameboy.lock(),
+                &rom_path,
+                &ui,
+                recent.clone(),
+                recent_path.clone(),
+            )
         }
     ));
 
@@ -557,33 +528,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 recent.truncate(5);
             }
 
-            let mut recent_writer = BufWriter::new(
-                fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(recent_path.clone())
-                    .expect("Couldn't open recent data file"),
-            );
-            recent_writer
-                .write_all(&serde_json::to_vec(&recent.read().as_slice()).unwrap())
-                .unwrap();
-            recent_writer.flush().unwrap();
-
-            gameboy.load_rom(rom_path);
-
-            ui.upgrade_in_event_loop(using!([recent], move |mut handle| {
-                handle.set_paused(false);
-                PLAYING.store(true, Ordering::Relaxed);
-                set_recent(&mut handle, &recent.read());
-                handle.invoke_focus();
-            }))
-            .unwrap();
+            load_rom(
+                &mut *gameboy,
+                &rom_path,
+                &ui,
+                recent.clone(),
+                recent_path.clone(),
+            )
         }
     ));
 
     ui.on_dropped(using!(
-        [gameboy, ui.as_weak(), recent, recent_path,],
+        [gameboy, ui.as_weak(), recent, recent_path],
         move |drop_event| {
             let file_url = drop_event.data.plain_text().unwrap();
 
@@ -591,30 +547,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let rom_path = Path::new(&stripped);
 
-            let gameboy = &mut *gameboy.lock();
-
-            let mut recent_writer = BufWriter::new(
-                fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(recent_path.clone())
-                    .expect("Couldn't open recent data file"),
+            load_rom(
+                &mut gameboy.lock(),
+                rom_path,
+                &ui,
+                recent.clone(),
+                recent_path.clone(),
             );
-            recent_writer
-                .write_all(&serde_json::to_vec(&recent.read().as_slice()).unwrap())
-                .unwrap();
-            recent_writer.flush().unwrap();
-
-            gameboy.load_rom(rom_path);
-
-            ui.upgrade_in_event_loop(using!([recent], move |mut handle| {
-                handle.set_paused(false);
-                PLAYING.store(true, Ordering::Relaxed);
-                set_recent(&mut handle, &recent.read());
-                handle.invoke_focus();
-            }))
-            .unwrap();
 
             drop_event.proposed_action
         }
@@ -640,6 +579,21 @@ fn main() -> Result<(), Box<dyn Error>> {
             {
                 let mut gameboy = gameboy.lock();
                 gameboy.tick(true);
+
+                let palette = &gameboy.palette;
+                let mut pixel_buffer = SharedPixelBuffer::new(160, 144);
+                let buffer = pixel_buffer.make_mut_slice();
+                gameboy
+                    .get_screen()
+                    .par_iter()
+                    .map(|pixel| palette[pixel].conv::<[u8; 4]>())
+                    .zip(buffer.par_iter_mut())
+                    .for_each(|(pixel, buffer_pixel)| {
+                        *buffer_pixel = pixel.into();
+                    });
+
+                ui.set_screen(Image::from_rgba8(pixel_buffer));
+                ui.window().request_redraw();
             }
 
             update_viewers(&gameboy, &tile_viewer, &tilemap_viewer);
@@ -673,6 +627,21 @@ fn main() -> Result<(), Box<dyn Error>> {
             {
                 let mut gameboy = gameboy.lock();
                 while !gameboy.tick(false) {}
+
+                let palette = &gameboy.palette;
+                let mut pixel_buffer = SharedPixelBuffer::new(160, 144);
+                let buffer = pixel_buffer.make_mut_slice();
+                gameboy
+                    .get_screen()
+                    .par_iter()
+                    .map(|pixel| palette[pixel].conv::<[u8; 4]>())
+                    .zip(buffer.par_iter_mut())
+                    .for_each(|(pixel, buffer_pixel)| {
+                        *buffer_pixel = pixel.into();
+                    });
+
+                ui.set_screen(Image::from_rgba8(pixel_buffer));
+                ui.window().request_redraw();
             }
             PLAYING.store(false, Ordering::Relaxed);
 
@@ -715,6 +684,53 @@ fn main() -> Result<(), Box<dyn Error>> {
     exit(0);
 
     Ok(())
+}
+
+fn load_rom(
+    gameboy: &mut GameBoy,
+    rom_path: impl AsRef<Path>,
+    ui: &Weak<AppWindow>,
+    recent: Arc<RwLock<IndexSet<PathBuf>>>,
+    recent_path: impl AsRef<Path>,
+) {
+    let rom_path = rom_path.as_ref();
+    {
+        let mut recent = recent.write();
+        recent.shift_insert(0, rom_path.to_path_buf());
+        recent.truncate(5);
+    }
+
+    let mut recent_writer = BufWriter::new(
+        fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&recent_path)
+            .expect("Couldn't open recent data file"),
+    );
+    recent_writer
+        .write_all(&serde_json::to_vec(&recent.read().as_slice()).unwrap())
+        .unwrap();
+    recent_writer.flush().unwrap();
+    let Ok(_) = gameboy.load_rom(rom_path) else {
+        rfd::MessageDialog::new()
+            .set_title("Failed to load rom")
+            .set_buttons(MessageButtons::Ok)
+            .set_level(MessageLevel::Error)
+            .set_description("Couldn't load selected ROM. It may be missing or moved.")
+            .show();
+
+        return;
+    };
+
+    ui.upgrade_in_event_loop(using!([recent], move |mut handle| {
+        handle.set_rom_loaded(true);
+        handle.set_paused(false);
+        PLAYING.store(true, Ordering::Relaxed);
+        set_recent(&mut handle, &recent.read());
+        handle.invoke_focus();
+    }))
+    .unwrap();
 }
 
 fn update_viewers(

@@ -378,6 +378,26 @@ impl ChannelLengthTimer {
 
 #[bitfield(u8, order = lsb0)]
 #[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
+pub struct ChannelLengthTimerShort {
+    #[bits(0..=5, default = 0xFF)]
+    length_timer: u8,
+    #[bits(6..=7, default = 0xFF)]
+    _unused: u8,
+}
+impl ChannelLengthTimerShort {
+    #[inline(always)]
+    pub fn read(self) -> u8 {
+        0b1111_1111
+    }
+
+    #[inline(always)]
+    pub fn write(&mut self, value: u8) {
+        *self = (value | 0b1100_0000).into();
+    }
+}
+
+#[bitfield(u8, order = lsb0)]
+#[derive(Default, Debug, TransparentWrapper, Clone, Copy, PartialEq)]
 pub struct ChannelVolume {
     #[bits(0..=4, default = 0xFF)]
     _unused: u8,
@@ -400,7 +420,7 @@ impl ChannelVolume {
 
 #[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
 #[repr(u8)]
-enum LfsrWidth {
+pub enum LfsrWidth {
     #[default]
     #[fallback]
     Fifteen = 0,
@@ -428,14 +448,27 @@ impl From<LfsrWidth> for bool {
 }
 
 #[bitfield(u8, order=lsb0)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, TransparentWrapper)]
+pub struct ClockDivider {
+    #[bits(0..=2, default=0b111)]
+    value: u8,
+}
+
+impl ClockDivider {
+    pub fn get(self) -> f64 {
+        (self.value() as f64).max(0.5)
+    }
+}
+
+#[bitfield(u8, order=lsb0)]
 #[derive(Default, Debug, TransparentWrapper, Copy, Clone, PartialEq)]
 pub struct ChannelFrequencyRandomness {
     #[bits(4..=7, default = 0xFF)]
     clock_shift: u8,
     #[bits(3, default = LfsrWidth::Seven)]
     lfsr_width: LfsrWidth,
-    #[bits(0..=2, default = 0xFF)]
-    clock_divider: u8,
+    #[bits(0..=2, default = ClockDivider::default())]
+    clock_divider: ClockDivider,
 }
 impl ChannelFrequencyRandomness {
     #[inline(always)]

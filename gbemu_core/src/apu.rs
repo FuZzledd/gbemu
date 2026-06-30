@@ -2,12 +2,12 @@ use core::{array, cmp};
 use std::collections::VecDeque;
 
 use crate::{
-    apu::registers::ChannelsEnabled,
-    context::{Context, Memory, MemoryBus},
-};
-use crate::{
     apu::registers::EnvelopeDirection,
     context::{Io, TimerRegister},
+};
+use crate::{
+    apu::registers::{ChannelsEnabled, LfsrWidth},
+    context::{Context, Memory, MemoryBus},
 };
 use better_default::Default;
 use bitvec::prelude::*;
@@ -41,6 +41,7 @@ pub struct APU {
     channel1: Channel1,
     channel2: Channel2,
     channel3: Channel3,
+    channel4: Channel4,
 
     clocks: u32,
 
@@ -53,12 +54,22 @@ pub struct APU {
 }
 
 impl APU {
-    fn channels_mut(&mut self) -> [&mut dyn Channel<MemoryBus>; 3] {
-        [&mut self.channel1, &mut self.channel2, &mut self.channel3]
+    fn channels_mut(&mut self) -> [&mut dyn Channel<MemoryBus>; 4] {
+        [
+            &mut self.channel1,
+            &mut self.channel2,
+            &mut self.channel3,
+            &mut self.channel4,
+        ]
     }
 
-    fn channels(&self) -> [&dyn Channel<MemoryBus>; 3] {
-        [&self.channel1, &self.channel2, &self.channel3]
+    fn channels(&self) -> [&dyn Channel<MemoryBus>; 4] {
+        [
+            &self.channel1,
+            &self.channel2,
+            &self.channel3,
+            &self.channel4,
+        ]
     }
 
     #[instrument(skip_all)]
@@ -79,12 +90,11 @@ impl APU {
         let frame = {
             let div_apu = self.div_apu;
             let cycle_counter = self.cycle_counter;
-            let clocks = self.clocks;
             self.channels_mut()
                 .into_iter()
                 .enumerate()
                 .map(|(idx, channel)| {
-                    let out = channel.tick(ctx, div_apu, cycle_counter, clocks);
+                    let out = channel.tick(ctx, div_apu, cycle_counter);
                     [
                         if audio_panning.get(idx).left() {
                             out * left_volume / 4.0
@@ -140,7 +150,7 @@ fn dac(value: u8) -> f64 {
 }
 
 trait Channel<M: Default + Memory> {
-    fn tick(&mut self, ctx: &mut Context<M>, div_apu: u8, cycle_count: u64, _clocks: u32) -> f64;
+    fn tick(&mut self, ctx: &mut Context<M>, div_apu: u8, cycle_count: u64) -> f64;
 
     #[allow(clippy::collapsible_if)]
     fn div_apu_tick(&mut self, ctx: &mut Context<M>, div_apu: u8);
@@ -181,13 +191,7 @@ struct Channel1 {
 }
 
 impl Channel<MemoryBus> for Channel1 {
-    fn tick(
-        &mut self,
-        ctx: &mut Context<MemoryBus>,
-        div_apu: u8,
-        cycle_count: u64,
-        _clocks: u32,
-    ) -> f64 {
+    fn tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8, cycle_count: u64) -> f64 {
         if ctx.memory.io().audio().nr10().pace() == 0 {
             self.sweep_pace = 0;
         }
@@ -364,13 +368,7 @@ struct Channel2 {
 }
 
 impl Channel<MemoryBus> for Channel2 {
-    fn tick(
-        &mut self,
-        ctx: &mut Context<MemoryBus>,
-        div_apu: u8,
-        cycle_count: u64,
-        _clocks: u32,
-    ) -> f64 {
+    fn tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8, cycle_count: u64) -> f64 {
         self.duty_cycle = ctx.memory.io().audio().nr21().wave_duty();
         self.length_enable = ctx.memory.io().audio().nr23_24().length_enable();
         let triggered = ctx.memory.io().audio().nr23_24().trigger();
@@ -489,26 +487,13 @@ struct Channel3 {
 
     enable: bool,
     volume: u8,
-    prev_output: i32,
 
-    #[default({
-        let mut buf = BlipBuf::new(48000 / 10);
-        buf.set_rates(4.194304E+6, 48000.0);
-        buf
-    })]
-    buffer: BlipBuf,
     sample: u8,
     capacitor: f64,
 }
 
 impl Channel<MemoryBus> for Channel3 {
-    fn tick(
-        &mut self,
-        ctx: &mut Context<MemoryBus>,
-        div_apu: u8,
-        cycle_count: u64,
-        _clocks: u32,
-    ) -> f64 {
+    fn tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8, cycle_count: u64) -> f64 {
         self.length_enable = ctx.memory.io().audio().nr33_34().length_enable();
         let triggered = ctx.memory.io().audio().nr33_34().trigger();
 
@@ -610,6 +595,138 @@ impl Channel<MemoryBus> for Channel3 {
     }
 }
 
+#[derive(Default)]
+struct Channel4 {
+    div_apu_prev: u8,
+
+    length_timer: u8,
+
+    envelope_direction: registers::EnvelopeDirection,
+    envelope_sweep_pace: u8,
+    envelope_timer: u8,
+
+    lfsr: u16,
+    lfsr_length: LfsrWidth,
+
+    clock_shift: u32,
+    clock_divider: f64,
+    length_enable: bool,
+
+    enable: bool,
+    volume: u8,
+
+    capacitor: f64,
+}
+
+impl Channel<MemoryBus> for Channel4 {
+    fn tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8, cycle_count: u64) -> f64 {
+        self.length_enable = ctx.memory.io().audio().nr44().length_enable();
+        self.clock_divider = ctx.memory.io().audio().nr43().clock_divider().get();
+        self.clock_shift = ctx.memory.io().audio().nr43().clock_shift() as u32;
+        let triggered = ctx.memory.io().audio().nr44().trigger();
+
+        if triggered {
+            ctx.memory
+                .io_mut()
+                .audio_mut()
+                .nr44_mut()
+                .set_trigger(false);
+            self.trigger(ctx);
+        }
+
+        let dac_on = if ctx.memory.io().audio().nr42().initial_volume() == 0
+            && ctx.memory.io().audio().nr42().envelope_direction() == EnvelopeDirection::Decrease
+        {
+            self.enable = false;
+            false
+        } else {
+            true
+        };
+
+        self.div_apu_tick(ctx, div_apu);
+
+        if self.clock_shift < 14
+            && cycle_count.is_multiple_of(
+                ((16 * 2u32.pow(self.clock_shift)) as f64 * self.clock_divider) as u64,
+            )
+        {
+            let result = !(self.lfsr ^ (self.lfsr >> 1) & 0b1);
+            self.lfsr = (self.lfsr & !(1 << 15)) | (result << 15);
+            if let LfsrWidth::Seven = self.lfsr_length {
+                self.lfsr = (self.lfsr & !(1 << 7)) | (result << 7);
+            }
+            self.lfsr >>= 1;
+        }
+
+        let raw_output = if self.enable && self.lfsr & 0b1 != 0 {
+            self.volume
+        } else {
+            0x0
+        };
+
+        if dac_on {
+            let input = dac(raw_output);
+            let out = input - self.capacitor;
+            self.capacitor = input - out * 0.99958;
+            out
+        } else {
+            0.0
+        }
+    }
+
+    #[allow(clippy::collapsible_if)]
+    fn div_apu_tick(&mut self, _ctx: &mut Context<MemoryBus>, div_apu: u8) {
+        if div_apu == self.div_apu_prev {
+            return;
+        }
+        //64 Hz
+        if div_apu.is_multiple_of(8) {
+            if self.envelope_sweep_pace != 0 {
+                self.envelope_timer = self.envelope_timer.wrapping_add(1);
+                if self.envelope_timer >= self.envelope_sweep_pace {
+                    match self.envelope_direction {
+                        registers::EnvelopeDirection::Decrease => {
+                            self.volume = self.volume.saturating_sub(1)
+                        }
+                        registers::EnvelopeDirection::Increase => {
+                            self.volume = cmp::min(self.volume + 1, 0xF)
+                        }
+                    }
+                }
+            }
+        }
+
+        //256 Hz
+        if div_apu.is_multiple_of(2) {
+            if self.length_enable {
+                self.length_timer = self.length_timer.wrapping_add(1);
+                if self.length_timer == 64 {
+                    self.enable = false;
+                }
+            }
+        }
+
+        self.div_apu_prev = div_apu;
+    }
+
+    fn trigger(&mut self, ctx: &mut Context<MemoryBus>) {
+        self.enable = true;
+        self.volume = ctx.memory.io().audio().nr42().initial_volume();
+        self.envelope_timer = 0;
+        self.envelope_direction = ctx.memory.io().audio().nr42().envelope_direction();
+        self.envelope_sweep_pace = ctx.memory.io().audio().nr42().sweep_pace();
+        self.lfsr = 0;
+
+        if self.length_timer >= 64 {
+            self.length_timer = ctx.memory.io().audio().nr41().length_timer()
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        self.enable
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct AudioRegisters {
     pub(crate) nr10: registers::ChannelSweep,
@@ -623,7 +740,7 @@ pub struct AudioRegisters {
     pub(crate) nr31: registers::ChannelLengthTimer,
     pub(crate) nr32: registers::ChannelVolume,
     pub(crate) nr33_34: registers::ChannelPeriodControl,
-    pub(crate) nr41: registers::ChannelLengthTimer,
+    pub(crate) nr41: registers::ChannelLengthTimerShort,
     pub(crate) nr42: registers::ChannelVolumeEnvelope,
     pub(crate) nr43: registers::ChannelFrequencyRandomness,
     pub(crate) nr44: registers::ChannelControl,
@@ -634,121 +751,160 @@ pub struct AudioRegisters {
 }
 
 impl AudioRegister for AudioRegisters {
+    #[inline(always)]
     fn nr10_mut(&mut self) -> &mut registers::ChannelSweep {
         &mut self.nr10
     }
+    #[inline(always)]
     fn nr11_mut(&mut self) -> &mut registers::ChannelLengthTimerWithDuty {
         &mut self.nr11
     }
+    #[inline(always)]
     fn nr12_mut(&mut self) -> &mut registers::ChannelVolumeEnvelope {
         &mut self.nr12
     }
+    #[inline(always)]
     fn nr13_14_mut(&mut self) -> &mut registers::ChannelPeriodControl {
         &mut self.nr13_14
     }
+    #[inline(always)]
     fn nr21_mut(&mut self) -> &mut registers::ChannelLengthTimerWithDuty {
         &mut self.nr21
     }
+    #[inline(always)]
     fn nr22_mut(&mut self) -> &mut registers::ChannelVolumeEnvelope {
         &mut self.nr22
     }
+    #[inline(always)]
     fn nr23_24_mut(&mut self) -> &mut registers::ChannelPeriodControl {
         &mut self.nr23_24
     }
+    #[inline(always)]
     fn nr30_mut(&mut self) -> &mut registers::ChannelDacEnable {
         &mut self.nr30
     }
+    #[inline(always)]
     fn nr31_mut(&mut self) -> &mut registers::ChannelLengthTimer {
         &mut self.nr31
     }
+    #[inline(always)]
     fn nr32_mut(&mut self) -> &mut registers::ChannelVolume {
         &mut self.nr32
     }
+    #[inline(always)]
     fn nr33_34_mut(&mut self) -> &mut registers::ChannelPeriodControl {
         &mut self.nr33_34
     }
-    fn nr41_mut(&mut self) -> &mut registers::ChannelLengthTimer {
+    #[inline(always)]
+    fn nr41_mut(&mut self) -> &mut registers::ChannelLengthTimerShort {
         &mut self.nr41
     }
+    #[inline(always)]
     fn nr42_mut(&mut self) -> &mut registers::ChannelVolumeEnvelope {
         &mut self.nr42
     }
+    #[inline(always)]
     fn nr43_mut(&mut self) -> &mut registers::ChannelFrequencyRandomness {
         &mut self.nr43
     }
+    #[inline(always)]
     fn nr44_mut(&mut self) -> &mut registers::ChannelControl {
         &mut self.nr44
     }
+    #[inline(always)]
     fn nr50_mut(&mut self) -> &mut registers::AudioVolume {
         &mut self.nr50
     }
+    #[inline(always)]
     fn nr51_mut(&mut self) -> &mut registers::AudioPanning {
         &mut self.nr51
     }
+    #[inline(always)]
     fn nr52_mut(&mut self) -> &mut registers::AudioEnable {
         &mut self.nr52
     }
+    #[inline(always)]
     fn nr10(&self) -> &registers::ChannelSweep {
         &self.nr10
     }
+    #[inline(always)]
     fn nr11(&self) -> &registers::ChannelLengthTimerWithDuty {
         &self.nr11
     }
+    #[inline(always)]
     fn nr12(&self) -> &registers::ChannelVolumeEnvelope {
         &self.nr12
     }
+    #[inline(always)]
     fn nr13_14(&self) -> &registers::ChannelPeriodControl {
         &self.nr13_14
     }
+    #[inline(always)]
     fn nr21(&self) -> &registers::ChannelLengthTimerWithDuty {
         &self.nr21
     }
+    #[inline(always)]
     fn nr22(&self) -> &registers::ChannelVolumeEnvelope {
         &self.nr22
     }
+    #[inline(always)]
     fn nr23_24(&self) -> &registers::ChannelPeriodControl {
         &self.nr23_24
     }
+    #[inline(always)]
     fn nr30(&self) -> &registers::ChannelDacEnable {
         &self.nr30
     }
+    #[inline(always)]
     fn nr31(&self) -> &registers::ChannelLengthTimer {
         &self.nr31
     }
+    #[inline(always)]
     fn nr32(&self) -> &registers::ChannelVolume {
         &self.nr32
     }
+    #[inline(always)]
     fn nr33_34(&self) -> &registers::ChannelPeriodControl {
         &self.nr33_34
     }
-    fn nr41(&self) -> &registers::ChannelLengthTimer {
+    #[inline(always)]
+    fn nr41(&self) -> &registers::ChannelLengthTimerShort {
         &self.nr41
     }
+    #[inline(always)]
     fn nr42(&self) -> &registers::ChannelVolumeEnvelope {
         &self.nr42
     }
+    #[inline(always)]
     fn nr43(&self) -> &registers::ChannelFrequencyRandomness {
         &self.nr43
     }
+    #[inline(always)]
     fn nr44(&self) -> &registers::ChannelControl {
         &self.nr44
     }
+    #[inline(always)]
     fn nr50(&self) -> &registers::AudioVolume {
         &self.nr50
     }
+    #[inline(always)]
     fn nr51(&self) -> &registers::AudioPanning {
         &self.nr51
     }
+    #[inline(always)]
     fn nr52(&self) -> &registers::AudioEnable {
         &self.nr52
     }
+    #[inline(always)]
     fn wave_pattern_ram(&self) -> &[u8; 16] {
         &self.wave_pattern_ram
     }
+    #[inline(always)]
     fn wave_pattern_ram_mut(&mut self) -> &mut [u8; 16] {
         &mut self.wave_pattern_ram
     }
 
+    #[inline(always)]
     fn read_u8(&self, address: u8) -> u8 {
         match address {
             0x00..0x10 => unreachable!(),
@@ -768,10 +924,13 @@ impl AudioRegister for AudioRegisters {
             0x1D => self.nr33_34().read().to_le_bytes()[0],
             0x1E => self.nr33_34().read().to_le_bytes()[1],
             0x1F => unimplemented_audio_read(address),
-            0x20..=0x23 => unimplemented_audio_read(address),
-            0x24 => self.nr50.read(),
-            0x25 => self.nr51.read(),
-            0x26 => self.nr52.read(),
+            0x20 => self.nr41().read(),
+            0x21 => self.nr42().read(),
+            0x22 => self.nr43().read(),
+            0x23 => self.nr44().read(),
+            0x24 => self.nr50().read(),
+            0x25 => self.nr51().read(),
+            0x26 => self.nr52().read(),
             0x27..0x30 => unimplemented_audio_read(address),
             0x30..=0x3F => self.wave_pattern_ram()[address as usize - 0x30],
             0x40.. => unreachable!(),
@@ -796,7 +955,10 @@ impl AudioRegister for AudioRegisters {
             0x1D => self.nr33_34_mut().set_low(value),
             0x1E => self.nr33_34_mut().set_high(value),
             0x1F => unimplemented_audio_write(address, value),
-            0x20..=0x23 => unimplemented_audio_write(address, value),
+            0x20 => self.nr41_mut().write(value),
+            0x21 => self.nr42_mut().write(value),
+            0x22 => self.nr43_mut().write(value),
+            0x23 => self.nr44_mut().write(value),
             0x24 => self.nr50_mut().write(value),
             0x25 => self.nr51_mut().write(value),
             0x26 => self.nr52_mut().write(value),
@@ -827,7 +989,7 @@ pub trait AudioRegister {
     fn nr31_mut(&mut self) -> &mut registers::ChannelLengthTimer;
     fn nr32_mut(&mut self) -> &mut registers::ChannelVolume;
     fn nr33_34_mut(&mut self) -> &mut registers::ChannelPeriodControl;
-    fn nr41_mut(&mut self) -> &mut registers::ChannelLengthTimer;
+    fn nr41_mut(&mut self) -> &mut registers::ChannelLengthTimerShort;
     fn nr42_mut(&mut self) -> &mut registers::ChannelVolumeEnvelope;
     fn nr43_mut(&mut self) -> &mut registers::ChannelFrequencyRandomness;
     fn nr44_mut(&mut self) -> &mut registers::ChannelControl;
@@ -845,7 +1007,7 @@ pub trait AudioRegister {
     fn nr31(&self) -> &registers::ChannelLengthTimer;
     fn nr32(&self) -> &registers::ChannelVolume;
     fn nr33_34(&self) -> &registers::ChannelPeriodControl;
-    fn nr41(&self) -> &registers::ChannelLengthTimer;
+    fn nr41(&self) -> &registers::ChannelLengthTimerShort;
     fn nr42(&self) -> &registers::ChannelVolumeEnvelope;
     fn nr43(&self) -> &registers::ChannelFrequencyRandomness;
     fn nr44(&self) -> &registers::ChannelControl;

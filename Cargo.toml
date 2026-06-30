@@ -4,6 +4,7 @@ members = ["gbemu_core", "gbemu_iced", "gbemu_slint", "gbemu_slint/slint"]
 default-members = ["gbemu_slint"]
 
 [workspace.dependencies]
+thiserror = "2.0.18"
 anyhow = "1.0.102"
 array-deque = "0.4.0"
 base64 = "0.22.1"

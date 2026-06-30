@@ -16,6 +16,7 @@ harness = false
 name = "mooneye"
 
 [dependencies]
+thiserror = {workspace = true}
 array-deque = { workspace = true }
 better_default = { workspace = true }
 bitvec = { workspace = true }

@@ -2646,6 +2646,7 @@ dependencies = [
  "spire_enum",
  "strum",
  "tap",
+ "thiserror 2.0.18",
  "time",
  "tracing",
  "unarc-rs",

@@ -15,9 +15,9 @@ use ringbuf::{StaticRb, traits::RingBuffer};
 use spire_enum::prelude::{delegate_impl, delegated_enum};
 use strum::FromRepr;
 use tap::Pipe;
+use thiserror::Error;
 use time::UtcDateTime;
 use tracing::{debug, info, warn};
-use unarc_rs::unified::ArchiveFormat::Arc;
 
 use crate::{
     apu::{AudioRegister, AudioRegisters},
@@ -920,8 +920,15 @@ pub struct Context<M: Memory + Default = MemoryBus> {
     pub rom_info: Option<RomInfo>,
 }
 
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum LoadRomError {
+    #[error("File could not be read, or is missing {0}")]
+    FileNotExists(PathBuf),
+}
+
 impl Context<MemoryBus> {
-    pub fn load_rom(&mut self, path: impl AsRef<Path>) {
+    pub fn load_rom(&mut self, path: impl AsRef<Path>) -> Result<(), LoadRomError> {
         let rom = if let Some(rom) = unarc_rs::unified::ArchiveFormat::open_path(&path)
             .ok()
             .and_then(|mut archive| {
@@ -956,7 +963,7 @@ impl Context<MemoryBus> {
             rom
         } else {
             //Not an archive, just read as a plain ROM file
-            fs::read(&path).unwrap()
+            fs::read(&path).map_err(|_| LoadRomError::FileNotExists(path.as_ref().to_path_buf()))?
         };
 
         let rom_info = RomInfo::new(&rom, path, self);
@@ -966,6 +973,8 @@ impl Context<MemoryBus> {
             self.memory.mapper.load_save(save_file);
         }
         self.rom_info = Some(rom_info);
+
+        Ok(())
     }
 
     pub fn save(&mut self) -> io::Result<()> {
@@ -1414,7 +1423,7 @@ impl AudioRegister for FlatMemory {
         todo!()
     }
 
-    fn nr41_mut(&mut self) -> &mut registers::ChannelLengthTimer {
+    fn nr41_mut(&mut self) -> &mut registers::ChannelLengthTimerShort {
         todo!()
     }
 
@@ -1486,7 +1495,7 @@ impl AudioRegister for FlatMemory {
         todo!()
     }
 
-    fn nr41(&self) -> &registers::ChannelLengthTimer {
+    fn nr41(&self) -> &registers::ChannelLengthTimerShort {
         todo!()
     }
 

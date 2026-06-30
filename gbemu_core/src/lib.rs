@@ -23,6 +23,7 @@ use crate::{
 use rayon::prelude::*;
 
 use std::hash_map;
+use crate::context::LoadRomError;
 
 pub static PLAYING: AtomicBool = AtomicBool::new(false);
 
@@ -168,12 +169,12 @@ impl GameBoy {
         }
     }
 
-    pub fn load_rom(&mut self, path: impl AsRef<Path>) {
+    pub fn load_rom(&mut self, path: impl AsRef<Path>) -> Result<(), LoadRomError> {
         self.cpu = CPU::default();
         self.context = Context::default();
 
         self.cpu.load_debug_initial_state(&mut self.context);
-        self.context.load_rom(path);
+        self.context.load_rom(path)
     }
 }
 

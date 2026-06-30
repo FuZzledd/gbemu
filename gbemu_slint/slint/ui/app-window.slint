@@ -4,7 +4,7 @@ export { TileViewer }from "tile-viewer.slint";
 export { TileMapViewer }from "tilemap-viewer.slint";
 export { SettingsWindow, KeyHelpers, ShortcutEntry }from "settings.slint";
 
-import { KeyHelpers } from "settings.slint";
+import { KeyHelpers, ShortcutEntry } from "settings.slint";
 
 enum KeyEventType { press, release }
 
@@ -42,6 +42,8 @@ export component AppWindow inherits Window {
     in-out property <bool> show_fps: false;
 
     in-out property <bool> auto_scale: true;
+
+    in property <bool> rom_loaded: false;
 
     in property <[RecentRom]> recent;
 
@@ -151,29 +153,32 @@ export component AppWindow inherits Window {
         Menu {
             title: @tr("Playback");
             MenuItem {
-                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("pause")].data;
+                private property <ShortcutEntry> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("pause")].data;
                 title: data.name;
                 shortcut: data.shortcut;
                 checkable: true;
                 checked <=> paused;
+                enabled: rom_loaded;
                 activated => {
                     toggle_playback()
                 }
             }
 
             MenuItem {
-                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("step_tick")].data;
+                private property <ShortcutEntry> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("step_tick")].data;
                 title: data.name;
                 shortcut: data.shortcut;
+                enabled: rom_loaded;
                 activated => {
                     step_tick()
                 }
             }
 
             MenuItem {
-                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("step_frame")].data;
+                private property <ShortcutEntry> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("step_frame")].data;
                 title: data.name;
                 shortcut: data.shortcut;
+                enabled: rom_loaded;
                 activated => {
                     step_frame()
                 }
@@ -191,7 +196,7 @@ export component AppWindow inherits Window {
             }
 
             MenuItem {
-                private property <{ name: string, shortcut: keys }> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("fullscreen")].data;
+                private property <ShortcutEntry> data: KeyHelpers.keyboard_shortcuts[KeyHelpers.get_keyboard_shortcut("fullscreen")].data;
                 title: data.name;
                 shortcut: data.shortcut;
                 checkable: true;

@@ -27,3 +27,6 @@ strip = "none"
 
 [profile.profiling.package."*"]
 codegen-backend = "llvm"
+
+[env]
+SLINT_ENABLE_EXPERIMENTAL_FEATURES = "1"
