@@ -5,33 +5,20 @@
   </component>
   <component name="CargoProjects">
     <cargoProject FILE="$PROJECT_DIR$/Cargo.toml">
+      <package file="$PROJECT_DIR$/gbemu_common">
+        <feature name="default" enabled="true" />
+      </package>
       <package file="$PROJECT_DIR$/gbemu_core">
         <feature name="default" enabled="true" />
       </package>
-      <package file="$PROJECT_DIR$/gbemu_iced">
+      <package file="$PROJECT_DIR$/gbemu_gpui">
         <feature name="default" enabled="true" />
-      </package>
-      <package file="$PROJECT_DIR$/gbemu_slint">
-        <feature name="default" enabled="true" />
-      </package>
-      <package file="$PROJECT_DIR$/gbemu_slint/slint">
-        <feature name="default" enabled="true" />
+        <feature name="no-tracing" enabled="true" />
       </package>
     </cargoProject>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="84108487-571c-4a5a-af42-ba91e861ab1d" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/dictionaries/project.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.cargo/config.toml" beforeDir="false" afterPath="$PROJECT_DIR$/.cargo/config.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Cargo.lock" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/gbemu_core/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/gbemu_core/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/gbemu_core/src/context.rs" beforeDir="false" afterPath="$PROJECT_DIR$/gbemu_core/src/context.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/gbemu_core/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/gbemu_core/src/lib.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/gbemu_slint/slint/ui/app-window.slint" beforeDir="false" afterPath="$PROJECT_DIR$/gbemu_slint/slint/ui/app-window.slint" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/gbemu_slint/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/gbemu_slint/src/main.rs" afterDir="false" />
-    </list>
+    <list default="true" id="84108487-571c-4a5a-af42-ba91e861ab1d" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -51,8 +38,71 @@
   <component name="MacroExpansionManager">
     <option name="directoryName" value="DegDjwoN" />
   </component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0000000708822676" />
+      <entry key="MS500" value="1.037162746618052" />
+      <entry key="S2" value="1.4515531852836268" />
+      <entry key="S5" value="1.9018378826618636" />
+      <entry key="S10" value="2.360311150619898" />
+      <entry key="S30" value="3.3157453956580447" />
+      <entry key="S60" value="5.002093851428262" />
+      <entry key="M2" value="8.646709290777741" />
+      <entry key="M5" value="16.7281436221024" />
+      <entry key="M10" value="33.407031376808696" />
+      <entry key="M15" value="56.098942463914234" />
+      <entry key="M30" value="140.2063477686096" />
+      <entry key="H1" value="303.05518183243674" />
+      <entry key="H2" value="548.0216597410421" />
+      <entry key="H4" value="959.3697250450552" />
+      <entry key="D1" value="4241.124028805966" />
+      <entry key="W1" value="7731.859746040623" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="1.2594008826917558E-101" />
+      <entry key="S2" value="5.957183779786023E-26" />
+      <entry key="S5" value="8.128622669817755E-11" />
+      <entry key="S10" value="9.026162912908994E-6" />
+      <entry key="S30" value="0.022987517271557335" />
+      <entry key="S60" value="0.19092506905017073" />
+      <entry key="M2" value="0.6048745476725271" />
+      <entry key="M5" value="1.6372971416449733" />
+      <entry key="M10" value="4.075714498286376" />
+      <entry key="M15" value="7.4704894040483385" />
+      <entry key="M30" value="19.10224428370603" />
+      <entry key="H1" value="38.80496649208279" />
+      <entry key="H2" value="67.20608122535859" />
+      <entry key="H4" value="118.06440190251405" />
+      <entry key="D1" value="485.35504102770483" />
+      <entry key="W1" value="846.7349158454311" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="3.1110343100106867E-7" />
+      <entry key="MS500" value="0.06523169767107477" />
+      <entry key="S2" value="0.834608971128537" />
+      <entry key="S5" value="1.5676616513636596" />
+      <entry key="S10" value="2.164729412249686" />
+      <entry key="S30" value="3.256021198958101" />
+      <entry key="S60" value="5.124574854762029" />
+      <entry key="M2" value="9.18069161929357" />
+      <entry key="M5" value="18.303717892889345" />
+      <entry key="M10" value="37.424426639548734" />
+      <entry key="M15" value="63.508332621608595" />
+      <entry key="M30" value="159.24096682383995" />
+      <entry key="H1" value="341.7929748126896" />
+      <entry key="H2" value="615.1685884258726" />
+      <entry key="H4" value="1077.381793730266" />
+      <entry key="D1" value="4726.445617095161" />
+      <entry key="W1" value="8578.58650237955" />
+    </decayedShown>
+  </component>
   <component name="ProblemsViewState">
-    <option name="selectedTabId" value="CurrentFile" />
+    <option name="selectedTabId" value="ProjectErrors" />
   </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 6,
@@ -63,39 +113,124 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Cargo.Run gbemu_iced.executor&quot;: &quot;Run&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.rust.reset.selective.auto.import&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;6ef3ccdd&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/zuzi/projects/all/gbemu&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;org.rust.cargo.project.model.PROJECT_DISCOVERY&quot;: &quot;true&quot;,
-    &quot;org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon&quot;: &quot;&quot;,
-    &quot;org.rust.first.attach.projects&quot;: &quot;true&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;language.rust&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Cargo.Build `Run gbemu_gpui`.executor": "Run",
+    "Cargo.Build gbemu_common.executor": "Run",
+    "Cargo.Build gbemu_core.executor": "Run",
+    "Cargo.Expand gbemu_core.executor": "Run",
+    "Cargo.Expand gbemu_core::debugging.executor": "Run",
+    "Cargo.Expand gbemu_gpui::actions.executor": "Run",
+    "Cargo.Run gbemu.executor": "Run",
+    "Cargo.Run gbemu_gpui.executor": "Run",
+    "Cargo.Run gbemu_iced.executor": "Run",
+    "CidrDebugProfileConversion": "true",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.rust.reset.selective.auto.import": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "6ef3ccdd",
+    "last_opened_file_path": "/home/zuzi/projects/all/wgpu_test",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.jshint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.jshint": "",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "org.rust.cargo.project.model.PROJECT_DISCOVERY": "true",
+    "org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon": "",
+    "org.rust.first.attach.projects": "true",
+    "settings.editor.selected.configurable": "language.rust.cargo.check",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/gbemu_gpui/src" />
       <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/gbemu_iced/src" />
     </key>
   </component>
-  <component name="RunManager" selected="Cargo.Run gbemu_iced">
+  <component name="RsExternalLinterProjectSettings">
+    <option name="tool" value="Clippy" />
+  </component>
+  <component name="RunManager" selected="Cargo.Run gbemu_gpui">
+    <configuration name="Build gbemu_core" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="build --package gbemu_core --lib" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Expand gbemu_core::debugging" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="expand --lib --color=always --theme=Dracula --tests debugging" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$/gbemu_core" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Expand gbemu_gpui::actions" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="expand --bin gbemu_gpui --color=always --theme=Dracula --tests actions" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$/gbemu_gpui" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="Run gbemu" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run --package gbemu --bin gbemu" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Run gbemu_gpui" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="buildProfileId" value="dev" />
+      <option name="command" value="run --package gbemu_gpui --bin gbemu_gpui" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
       <option name="emulateTerminal" value="true" />
@@ -147,8 +282,11 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Cargo.Run gbemu_gpui" />
+        <item itemvalue="Cargo.Expand gbemu_gpui::actions" />
         <item itemvalue="Cargo.Run gbemu_iced" />
-        <item itemvalue="Cargo.Run gbemu_iced" />
+        <item itemvalue="Cargo.Expand gbemu_core::debugging" />
+        <item itemvalue="Cargo.Build gbemu_core" />
       </list>
     </recent_temporary>
   </component>
@@ -168,6 +306,12 @@
       <workItem from="1779382373978" duration="2790000" />
       <workItem from="1780009840422" duration="2270000" />
       <workItem from="1782833080230" duration="4569000" />
+      <workItem from="1783852953759" duration="1433000" />
+      <workItem from="1784909126657" duration="510000" />
+      <workItem from="1784909649398" duration="10413000" />
+      <workItem from="1784921526725" duration="910000" />
+      <workItem from="1784923434474" duration="17221000" />
+      <workItem from="1784961635353" duration="18347000" />
     </task>
     <servers />
   </component>

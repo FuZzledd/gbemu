@@ -257,23 +257,7 @@ impl<T: Memory + Default> CPU<T> {
             }
             if let State::ExecutionDone = self.state {
                 if !self.halted {
-                    debug!(
-                        "A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}",
-                        self.registers.a,
-                        *self.registers.f,
-                        self.registers.b,
-                        self.registers.c,
-                        self.registers.d,
-                        self.registers.e,
-                        self.registers.h,
-                        self.registers.l,
-                        self.registers.sp,
-                        self.pc,
-                        ctx.memory.read_u8(self.pc),
-                        ctx.memory.read_u8(self.pc.wrapping_add(1)),
-                        ctx.memory.read_u8(self.pc.wrapping_add(2)),
-                        ctx.memory.read_u8(self.pc.wrapping_add(3)),
-                    );
+                    debug!("{}", self.dump_state(ctx));
                     self.ir = ctx.memory.read_u8(self.pc);
                     self.pc = self.pc.wrapping_add(1);
                 } else {

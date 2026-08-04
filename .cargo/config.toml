@@ -30,3 +30,4 @@ codegen-backend = "llvm"
 
 [env]
 SLINT_ENABLE_EXPERIMENTAL_FEATURES = "1"
+RUST_BACKTRACE = "1"

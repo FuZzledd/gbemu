@@ -1,0 +1,85 @@
+[package]
+name = "gbemu_gpui"
+version = "0.1.0"
+edition = "2024"
+
+
+[features]
+default = ["tracing/release_max_level_off"]
+no-tracing = ["tracing/max_level_off"]
+
+[dependencies]
+gbemu_common = { workspace = true, features = ["gpui"] }
+anyhow = { workspace = true }
+better_default = { workspace = true }
+convert_case = "0.11.0"
+cpal = { workspace = true, features = ["jack", "pipewire", "pulseaudio"] }
+crossbeam = { workspace = true }
+dasp = {
+  workspace = true,
+  features = [
+    "interpolate",
+    "interpolate-linear",
+    "interpolate-sinc",
+    "ring_buffer",
+    "signal",
+  ]
+}
+docstr.workspace = true
+dasp_sample = { workspace = true }
+dioxus-devtools = "0.7.9"
+etcetera = { workspace = true }
+flume.workspace = true
+gbemu_core = { workspace = true }
+gpui = { workspace = true, features = ["font-kit", "wayland", "x11"] }
+gpui_elements.workspace = true
+gpui_platform = {
+  workspace = true,
+  features = ["font-kit", "wayland", "wgpu", "x11"]
+}
+# gpui-component = { workspace = true }
+# gpui-component-assets.workspace = true
+image.workspace = true
+image24 = { package = "image", version = "0.24.9" }
+include_dir = { workspace = true, features = ["glob"] }
+indexmap = { workspace = true, features = ["serde"] }
+itertools = { workspace = true }
+parking_lot = { workspace = true }
+png.workspace = true
+png-achunk.workspace = true
+rayon.workspace = true
+rfd = { workspace = true }
+ringbuf = { workspace = true }
+rust-embed = {
+  version = "8.12.0",
+  features = ["compression", "include-exclude", "interpolate-folder-path"]
+}
+schemars.workspace = true
+seq-macro.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }
+smallvec = "1.15.2"
+spin_sleep = { workspace = true }
+subsecond = "0.7.9"
+tap = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time"] }
+tracing = { workspace = true }
+tracing-flame = { workspace = true }
+tracing-log = { workspace = true }
+tracing-samply = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "registry"] }
+uzi = { workspace = true }
+wgpu = "29.0.3"
+strum = { workspace = true, features = ["derive"] }
+num-traits.workspace = true
+palette = { workspace = true, features = ["named"] }
+chumsky.workspace = true
+bytemuck.workspace = true
+spire_enum.workspace = true
+
+[build-dependencies]
+gbemu_common = { workspace = true }
+databake = { version = "0.2.1" }
+glob = "0.3.3"
+serde = { workspace = true }
+yaml_serde = "0.10.4"

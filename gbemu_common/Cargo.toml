@@ -1,0 +1,15 @@
+[package]
+name = "gbemu_common"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+gpui = ["dep:gpui"]
+
+[dependencies]
+serde = {workspace = true, features = ["derive"]}
+serde_json = {workspace = true}
+databake = {version = "0.2.1", features = ["derive"]}
+palette = {workspace = true, features = ["serializing"]}
+
+gpui = {workspace = true, optional = true}

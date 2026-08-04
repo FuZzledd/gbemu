@@ -1,5 +1,8 @@
+use bytes::BytesMut;
 use datatest_stable::Utf8Path;
-use gbemu_core::{GameBoy, cpu::registers::Registers};
+use gbemu_core::{GameBoy, Palette, cpu::registers::Registers, ppu};
+use rgb::Gray;
+use tap::{Conv, Tap};
 
 mod common;
 
@@ -15,11 +18,11 @@ fn test_emulator_only(path: &Utf8Path, rom: Vec<u8>) -> datatest_stable::Result<
 
 fn test_acceptance(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()> {
     let mut gameboy: GameBoy = GameBoy::default();
-    gameboy.load_rom(path);
+    gameboy.load_rom(path).unwrap();
 
     let status = loop {
         loop {
-            let redraw = gameboy.tick(false);
+            let redraw = gameboy.tick(true).should_redraw();
             if redraw {
                 break;
             }
@@ -51,15 +54,22 @@ fn test_acceptance(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()
 
     for _ in 0..4 {
         loop {
-            let redraw = gameboy.tick(false);
+            let redraw = gameboy.tick(false).should_redraw();
             if redraw {
                 break;
             }
         }
     }
 
-    let image =
-        common::inline_iterm2_image_from_buffer(gameboy.buffer.clone(), path.file_name().unwrap());
+    let palette = Palette::default();
+
+    let buffer: BytesMut = gameboy
+        .get_screen()
+        .iter()
+        .flat_map(|pixel| palette[pixel].conv::<[u8; 4]>())
+        .collect();
+
+    let image = common::inline_iterm2_image_from_buffer(buffer, path.file_name().unwrap());
 
     println!("Result\n {image}");
 

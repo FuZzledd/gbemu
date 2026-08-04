@@ -1,33 +1,68 @@
-use core::{array, cmp};
-use std::collections::VecDeque;
-
 use crate::{
     apu::registers::EnvelopeDirection,
     context::{Io, TimerRegister},
 };
 use crate::{
-    apu::registers::{ChannelsEnabled, LfsrWidth},
+    apu::registers::LfsrWidth,
     context::{Context, Memory, MemoryBus},
 };
 use better_default::Default;
-use bitvec::prelude::*;
 use blip_buf::BlipBuf;
-use bytes::buf;
+use core::{array, cmp};
 use crossbeam::channel::{self, Receiver, Sender};
 use dasp::{Frame, Sample};
-use itertools::{Itertools, izip};
+use itertools::izip;
+use seq_macro::seq;
+use std::thread;
+use std::thread::JoinHandle;
 use tracing::instrument;
-use uzi::using;
+
 pub(crate) mod registers;
 
 type ExternalChannel<T> = (Sender<T>, Receiver<T>);
 
+const CLOCK_DIVISOR: f64 = 1.0;
+
 fn create_blip_bufs() -> [BlipBuf; 2] {
     array::from_fn(|_| {
         let mut buf = BlipBuf::new(48_000 / 10);
-        buf.set_rates(4.194304E+6, 48_000.0);
+        buf.set_rates(4.194304E+6 / CLOCK_DIVISOR, 48_000.0);
         buf
     })
+}
+
+pub struct APUSupport {
+    pub output_channel: Sender<Vec<[i16; 2]>>,
+    pub input_receiver: Receiver<Vec<(u32, [i32; 2])>>,
+
+    blip_bufs: [BlipBuf; 2],
+}
+
+impl APUSupport {
+    pub fn start(mut self) -> JoinHandle<()> {
+        thread::spawn(move || {
+            loop {
+                if let Ok(buffer) = self.input_receiver.recv() {
+                    for (clocks, frame) in buffer {
+                        for (buf, delta) in izip!(self.blip_bufs.iter_mut(), frame) {
+                            buf.add_delta(clocks / CLOCK_DIVISOR as u32, delta);
+                        }
+                    }
+                    for buf in self.blip_bufs.iter_mut() {
+                        buf.end_frame(buf.clocks_needed(512));
+                    }
+                    let (mut buf_l, mut buf_r) = ([0; 512], [0; 512]);
+                    while self.blip_bufs[0].samples_avail() > 0 {
+                        self.blip_bufs[0].read_samples(&mut buf_l, false);
+                        self.blip_bufs[1].read_samples(&mut buf_r, false);
+
+                        let output_buffer = izip!(buf_l, buf_r).map(|(l, r)| [l, r]).collect();
+                        let _ = self.output_channel.send(output_buffer);
+                    }
+                }
+            }
+        })
+    }
 }
 
 #[derive(Default)]
@@ -44,32 +79,27 @@ pub struct APU {
     channel4: Channel4,
 
     clocks: u32,
+    clocks_needed: u32,
 
-    #[default(create_blip_bufs())]
-    blip_bufs: [BlipBuf; 2],
+    buffer: Vec<(u32, [i32; 2])>,
     prev_frame: [i16; 2],
 
     #[default(channel::bounded(512))]
-    pub output_channel: ExternalChannel<VecDeque<[i16; 2]>>,
+    buffer_channel: ExternalChannel<Vec<(u32, [i32; 2])>>,
+
+    #[default(channel::bounded(512))]
+    pub output_channel: ExternalChannel<Vec<[i16; 2]>>,
 }
 
 impl APU {
-    fn channels_mut(&mut self) -> [&mut dyn Channel<MemoryBus>; 4] {
-        [
-            &mut self.channel1,
-            &mut self.channel2,
-            &mut self.channel3,
-            &mut self.channel4,
-        ]
-    }
-
-    fn channels(&self) -> [&dyn Channel<MemoryBus>; 4] {
-        [
-            &self.channel1,
-            &self.channel2,
-            &self.channel3,
-            &self.channel4,
-        ]
+    pub fn create_support(&mut self, ctx: &mut Context<MemoryBus>) -> APUSupport {
+        let support = APUSupport {
+            output_channel: self.output_channel.0.clone(),
+            input_receiver: self.buffer_channel.1.clone(),
+            blip_bufs: create_blip_bufs(),
+        };
+        self.clocks_needed = support.blip_bufs[0].clocks_needed(512);
+        support
     }
 
     #[instrument(skip_all)]
@@ -87,64 +117,60 @@ impl APU {
 
         let audio_panning = *ctx.memory.io().audio().nr51();
 
-        let frame = {
-            let div_apu = self.div_apu;
-            let cycle_counter = self.cycle_counter;
-            self.channels_mut()
-                .into_iter()
-                .enumerate()
-                .map(|(idx, channel)| {
-                    let out = channel.tick(ctx, div_apu, cycle_counter);
-                    [
-                        if audio_panning.get(idx).left() {
-                            out * left_volume / 4.0
-                        } else {
-                            0.0
-                        },
-                        if audio_panning.get(idx).right() {
-                            out * right_volume / 4.0
-                        } else {
-                            0.0
-                        },
-                    ]
-                })
-                .fold([0.0, 0.0], |[sum_l, sum_r], [l, r]| [sum_l + l, sum_r + r])
-                .map(Sample::to_sample::<i16>)
-        };
+        let div_apu = self.div_apu;
+        let cycle_counter = self.cycle_counter;
 
-        for (buf, sample, prev) in izip!(self.blip_bufs.iter_mut(), frame, self.prev_frame) {
-            buf.add_delta_fast(self.clocks, sample as i32 - prev as i32);
-        }
+        let channel_out = seq!(N in 1..=4 {
+            [
+            #(self.channel~N.tick(ctx, div_apu, cycle_counter),)*
+            ]
+        });
 
-        self.prev_frame = frame;
-
-        if self.clocks == 0 {
-            for buf in self.blip_bufs.iter_mut() {
-                buf.end_frame(buf.clocks_needed(512));
-            }
-            let (mut buf_l, mut buf_r) = ([0; 512], [0; 512]);
-            while self.blip_bufs[0].samples_avail() > 0 {
-                self.blip_bufs[0].read_samples(&mut buf_l, false);
-                self.blip_bufs[1].read_samples(&mut buf_r, false);
-
-                let output_buffer = izip!(buf_l, buf_r).map(|(l, r)| [l, r]).collect();
-                let _ = self.output_channel.0.send(output_buffer);
-            }
+        if self.clocks.is_multiple_of(CLOCK_DIVISOR as u32) {
+            let frame = {
+                channel_out
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, out)| {
+                        [
+                            if audio_panning.get(idx).left() {
+                                out * left_volume / 4.0
+                            } else {
+                                0.0
+                            },
+                            if audio_panning.get(idx).right() {
+                                out * right_volume / 4.0
+                            } else {
+                                0.0
+                            },
+                        ]
+                    })
+                    .reduce(|[sum_l, sum_r], [l, r]| [sum_l + l, sum_r + r])
+                    .unwrap()
+                    .map(Sample::to_sample::<i16>)
+            };
+            let delta: [i32; 2] =
+                frame.zip_map(self.prev_frame, |frame, prev| frame as i32 - prev as i32);
+            self.buffer.push((self.clocks, delta));
+            self.prev_frame = frame;
         }
 
         let audio_control = ctx.memory.io_mut().audio_mut().nr52_mut();
-        for i in 0..3 {
-            audio_control.set_channel(i, self.channels()[i].enabled());
-        }
+        seq!(N in 1..=4 {
+            #[allow(clippy::eq_op)]
+            audio_control.set_channel::<usize>(N - 1, self.channel~N.enabled());
+        });
 
         self.cycle_counter = self.cycle_counter.wrapping_add(1);
-        self.clocks = (self.clocks + 1) % self.blip_bufs[0].clocks_needed(512);
+        self.clocks = (self.clocks + 1) % (self.clocks_needed * CLOCK_DIVISOR as u32);
+
+        if self.clocks == 0 {
+            self.buffer_channel.0.send(self.buffer.clone()).unwrap();
+            self.buffer.clear();
+        }
     }
 }
 
-fn to_i32(value: u8) -> i32 {
-    -2000 * value as i32 + 16000
-}
 fn dac(value: u8) -> f64 {
     -(value as f64) / 15.0 + 0.5
 }
@@ -191,6 +217,7 @@ struct Channel1 {
 }
 
 impl Channel<MemoryBus> for Channel1 {
+    #[instrument(skip_all)]
     fn tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8, cycle_count: u64) -> f64 {
         if ctx.memory.io().audio().nr10().pace() == 0 {
             self.sweep_pace = 0;
@@ -248,6 +275,7 @@ impl Channel<MemoryBus> for Channel1 {
     }
 
     #[allow(clippy::collapsible_if)]
+    #[instrument(skip_all)]
     fn div_apu_tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
@@ -296,6 +324,7 @@ impl Channel<MemoryBus> for Channel1 {
         self.div_apu_prev = div_apu;
     }
 
+    #[instrument(skip_all)]
     fn trigger(&mut self, ctx: &mut Context<MemoryBus>) {
         self.enable = true;
         self.period = ctx.memory.io().audio().nr13_14().period();
@@ -322,6 +351,7 @@ impl Channel<MemoryBus> for Channel1 {
 }
 
 impl Channel1 {
+    #[instrument(skip_all)]
     fn calculate_sweep(&mut self, ctx: &mut Context<MemoryBus>, write_back: bool) {
         let frequency = {
             let modifier = self.period >> self.sweep_individual_step;
@@ -368,6 +398,7 @@ struct Channel2 {
 }
 
 impl Channel<MemoryBus> for Channel2 {
+    #[instrument(skip_all)]
     fn tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8, cycle_count: u64) -> f64 {
         self.duty_cycle = ctx.memory.io().audio().nr21().wave_duty();
         self.length_enable = ctx.memory.io().audio().nr23_24().length_enable();
@@ -420,6 +451,7 @@ impl Channel<MemoryBus> for Channel2 {
     }
 
     #[allow(clippy::collapsible_if)]
+    #[instrument(skip_all)]
     fn div_apu_tick(&mut self, _ctx: &mut Context<MemoryBus>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
@@ -454,6 +486,7 @@ impl Channel<MemoryBus> for Channel2 {
         self.div_apu_prev = div_apu;
     }
 
+    #[instrument(skip_all)]
     fn trigger(&mut self, ctx: &mut Context<MemoryBus>) {
         self.enable = true;
         self.period = ctx.memory.io().audio().nr23_24().period();
@@ -493,6 +526,7 @@ struct Channel3 {
 }
 
 impl Channel<MemoryBus> for Channel3 {
+    #[instrument(skip_all)]
     fn tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8, cycle_count: u64) -> f64 {
         self.length_enable = ctx.memory.io().audio().nr33_34().length_enable();
         let triggered = ctx.memory.io().audio().nr33_34().trigger();
@@ -559,6 +593,7 @@ impl Channel<MemoryBus> for Channel3 {
     }
 
     #[allow(clippy::collapsible_if)]
+    #[instrument(skip_all)]
     fn div_apu_tick(&mut self, _ctx: &mut Context<MemoryBus>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
@@ -577,6 +612,7 @@ impl Channel<MemoryBus> for Channel3 {
         self.div_apu_prev = div_apu;
     }
 
+    #[instrument(skip_all)]
     fn trigger(&mut self, ctx: &mut Context<MemoryBus>) {
         self.enable = true;
         self.period = ctx.memory.io().audio().nr33_34().period();
@@ -619,6 +655,7 @@ struct Channel4 {
 }
 
 impl Channel<MemoryBus> for Channel4 {
+    #[instrument(skip_all)]
     fn tick(&mut self, ctx: &mut Context<MemoryBus>, div_apu: u8, cycle_count: u64) -> f64 {
         self.length_enable = ctx.memory.io().audio().nr44().length_enable();
         self.clock_divider = ctx.memory.io().audio().nr43().clock_divider().get();
@@ -675,6 +712,7 @@ impl Channel<MemoryBus> for Channel4 {
     }
 
     #[allow(clippy::collapsible_if)]
+    #[instrument(skip_all)]
     fn div_apu_tick(&mut self, _ctx: &mut Context<MemoryBus>, div_apu: u8) {
         if div_apu == self.div_apu_prev {
             return;
@@ -709,6 +747,7 @@ impl Channel<MemoryBus> for Channel4 {
         self.div_apu_prev = div_apu;
     }
 
+    #[instrument(skip_all)]
     fn trigger(&mut self, ctx: &mut Context<MemoryBus>) {
         self.enable = true;
         self.volume = ctx.memory.io().audio().nr42().initial_volume();

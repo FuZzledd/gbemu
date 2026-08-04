@@ -1,35 +1,36 @@
 #![feature(uint_gather_scatter_bits)]
-#![feature(hash_map_macro)]
 
 use core::{
     borrow::Borrow,
     ops::{BitAnd, BitOr, Index, IndexMut, Not, Shl, Shr},
     sync::atomic::{AtomicBool, Ordering},
 };
-use std::{collections::HashMap, path::Path, sync::LazyLock};
+use std::mem;
+use std::{path::Path, sync::LazyLock};
 
-use bytes::{Bytes, BytesMut};
-use crossbeam::channel::{Receiver, Sender};
-use rgb::Rgba;
-use tap::{Conv, Pipe, Tap};
+use parking_lot::Mutex;
+use rgb::{ComponentMap, Gray, Rgba};
+use tap::Conv;
 use tracing::instrument;
 
 use crate::{
-    apu::APU,
     context::{Context, InterruptRegister, InterruptType::Joypad, Memory, MemoryBus, Serial},
     cpu::CPU,
-    ppu::{Mode, PPU, Pixel},
+    debugging::{BreakpointData, Breakpoints},
+    ppu::{Mode, Pixel},
 };
-use rayon::prelude::*;
 
-use std::hash_map;
 use crate::context::LoadRomError;
+use crate::debugging::{BREAKPOINT_REPORTER, HitBreakpoint};
+use bytemuck::{Pod, Zeroable};
+use std::default::Default;
 
 pub static PLAYING: AtomicBool = AtomicBool::new(false);
 
 pub mod apu;
 pub mod context;
 pub mod cpu;
+pub mod debugging;
 pub mod opcode;
 pub mod ppu;
 
@@ -80,41 +81,121 @@ pub enum GameBoyButton {
     Down,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
-pub struct Palette {
-    inner: [Rgba<u8>; 4],
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(transparent)]
+pub struct Palette<T = u8> {
+    inner: [Rgba<T>; 4],
 }
 
-impl<T: Borrow<Pixel>> IndexMut<T> for Palette {
+impl<T: Borrow<Pixel>, U> IndexMut<T> for Palette<U> {
     fn index_mut(&mut self, index: T) -> &mut Self::Output {
         &mut self.inner[*index.borrow() as usize]
     }
 }
 
-impl<T: Borrow<Pixel>> Index<T> for Palette {
-    type Output = Rgba<u8>;
+impl<T: Borrow<Pixel>, U> Index<T> for Palette<U> {
+    type Output = Rgba<U>;
 
     fn index(&self, index: T) -> &Self::Output {
         &self.inner[*index.borrow() as usize]
     }
 }
+impl Default for Palette {
+    fn default() -> Self {
+        use ppu::Pixel::*;
+        let mut palette = Self {
+            inner: Default::default(),
+        };
+
+        palette[White] = Gray::new(0xFF).conv::<Rgba<u8>>();
+        palette[LightGray] = Gray::new(0xAA).conv::<Rgba<u8>>();
+        palette[DarkGrey] = Gray::new(0x55).conv::<Rgba<u8>>();
+        palette[Black] = Gray::new(0x00).conv::<Rgba<u8>>();
+        palette
+    }
+}
+impl From<Palette<u8>> for Palette<f32> {
+    fn from(value: Palette<u8>) -> Self {
+        Palette {
+            inner: value
+                .inner
+                .map(|color| color.map(|component| component as f32 / 255.0)),
+        }
+    }
+}
+
+impl From<Palette<f32>> for Palette<u8> {
+    fn from(value: Palette<f32>) -> Self {
+        Palette {
+            inner: value
+                .inner
+                .map(|color| color.map(|component| (component * 255.0) as u8)),
+        }
+    }
+}
 
 pub struct GameBoy {
-    pub buffer: BytesMut,
     pub context: Context<MemoryBus>,
     pub cpu: cpu::CPU<MemoryBus>,
     pub ppu: ppu::PPU,
     pub apu: apu::APU,
     pub counter: u64,
-    pub palette: Palette,
+}
+
+pub static DEBUGGING_ENABLED: AtomicBool = AtomicBool::new(false);
+pub static BREAKPOINTS: LazyLock<Mutex<Breakpoints>> = LazyLock::new(Default::default);
+pub static HIT_BREAKPOINTS: LazyLock<Mutex<Vec<HitBreakpoint>>> = LazyLock::new(Default::default);
+
+#[derive(Debug, Clone, Copy)]
+pub enum PlaybackMessage {
+    TogglePlayback,
+    Pause,
+    Play,
+    StepTick(usize),
+    StepFrame(usize),
+}
+
+pub static PLAYBACK_CONTROLLER: LazyLock<(
+    flume::Sender<PlaybackMessage>,
+    flume::Receiver<PlaybackMessage>,
+)> = LazyLock::new(|| flume::bounded(16));
+
+#[derive(Debug, Clone, Copy)]
+pub enum TickStatus {
+    Normal,
+    DrawRequested,
+    BreakpointHit,
+}
+
+impl TickStatus {
+    #[inline(always)]
+    pub fn should_redraw(self) -> bool {
+        !matches!(self, TickStatus::Normal)
+    }
 }
 
 impl GameBoy {
     #[instrument(skip_all)]
-    pub fn tick(&mut self, manual: bool) -> bool {
+    pub fn tick(&mut self, manual: bool) -> TickStatus {
+        use TickStatus::*;
+        let debugging_enabled = DEBUGGING_ENABLED.load(Ordering::Relaxed);
+        if debugging_enabled {
+            let breakpoints = BREAKPOINTS.lock();
+            let hit_breakpoints = breakpoints
+                .pc_value
+                .iter()
+                .filter(|(_, breakpoint)| {
+                    breakpoint.enabled && breakpoint.breakpoint.pc == self.cpu.pc
+                })
+                .map(|(id, _breakpoint)| (*id, BreakpointData::Addr(self.cpu.pc)));
+
+            HIT_BREAKPOINTS.lock().extend(hit_breakpoints);
+        };
+
         if !PLAYING.load(Ordering::Relaxed) && !manual {
-            return false || manual;
+            return Normal;
         }
+
         if self.counter.is_multiple_of(4) {
             self.cpu.tick(&mut self.context);
             self.context.memory.tick_oam_dma();
@@ -130,18 +211,34 @@ impl GameBoy {
 
         self.counter = self.counter.wrapping_add(1);
 
-        if (self.ppu.current_mode == Mode::VBlank
-            && self.context.memory.io.lcd.ly == 144
-            && self.ppu.cycle_counter == 0)
-            || manual
+        if debugging_enabled
+            && let mut hit_breakpoints = HIT_BREAKPOINTS.lock()
+            && !hit_breakpoints.is_empty()
         {
-            return true;
+            BREAKPOINT_REPORTER
+                .0
+                .send(mem::take(&mut hit_breakpoints))
+                .unwrap();
+            PLAYING.store(false, Ordering::Relaxed);
+
+            return BreakpointHit;
         }
-        false
+
+        if self.ppu.current_mode == Mode::VBlank
+            && self.context.memory.io.lcd.ly == 144
+            && self.ppu.cycle_counter == 0
+        {
+            return DrawRequested;
+        }
+        Normal
     }
 
     pub fn get_screen(&self) -> &[Pixel; 23040] {
         &self.ppu.screen
+    }
+
+    pub fn get_screen_mut(&mut self) -> &mut [Pixel; 23040] {
+        &mut self.ppu.screen
     }
 
     pub fn set_joypad_state(&mut self, button: GameBoyButton, state: bool) {
@@ -180,32 +277,18 @@ impl GameBoy {
 
 impl Default for GameBoy {
     fn default() -> Self {
-        let context = Context::default();
+        let mut context = Context::default();
         let cpu = cpu::CPU::default();
         let ppu = ppu::PPU::default();
-        let apu = apu::APU::default();
-
-        let mut buffer = BytesMut::zeroed(160 * 144 * 4);
-        for pixel in buffer.as_chunks_mut::<4>().0 {
-            pixel[3] = 0xFF
-        }
-
-        let palette = Palette::default().tap_mut(|palette| {
-            use ppu::Pixel::*;
-            palette[White] = [220, 220, 220, 255].into();
-            palette[LightGray] = [160, 160, 160, 255].into();
-            palette[DarkGrey] = [80, 80, 80, 255].into();
-            palette[Black] = [0, 0, 0, 255].into();
-        });
+        let mut apu = apu::APU::default();
+        apu.create_support(&mut context).start();
 
         Self {
-            buffer,
             context,
             cpu,
             ppu,
             apu,
             counter: 0,
-            palette,
         }
     }
 }

@@ -1,0 +1,73 @@
+[package]
+name = "gbemu_dioxus"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+anyrender.workspace = true
+anyrender_vello_hybrid.workspace = true
+blitz-dom = { workspace = true }
+blitz-shell = { workspace = true }
+blitz-traits = { workspace = true }
+cpal = { workspace = true, features = ["jack", "pipewire", "pulseaudio"] }
+crossbeam.workspace = true
+dasp = {
+  workspace = true,
+  features = [
+    "interpolate",
+    "interpolate-floor",
+    "interpolate-linear",
+    "interpolate-sinc",
+    "ring_buffer",
+    "signal"
+  ]
+}
+dioxus-asset-resolver = { version = "0.7.9", features = ["native"] }
+dioxus-free-icons = {
+  version = "0.10.0",
+  features = [
+    "font-awesome-brands",
+    "font-awesome-regular",
+    "font-awesome-solid",
+    "material-design-icons-content"
+  ]
+}
+dioxus-native = {
+  workspace = true,
+  default-features = true,
+  features = [
+    "accessibility",
+    "clipboard",
+    "file-dialog",
+    "hot-reload",
+    "html",
+    "incremental",
+    "net",
+    "prelude",
+    "svg",
+    "system-fonts",
+    "vello-hybrid",
+    "woff"
+  ]
+}
+etcetera.workspace = true
+gbemu_core.workspace = true
+indexmap = { workspace = true, features = ["serde"] }
+kurbo = "0.13.1"
+parking_lot.workspace = true
+peniko = "0.6.1"
+rayon.workspace = true
+rfd.workspace = true
+ringbuf.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+spin_sleep.workspace = true
+tap.workspace = true
+tokio = { version = "1.52.3", features = ["time"] }
+uzi.workspace = true
+webbrowser = "1.2.1"
+wgpu = "29.0.0"
+winit = "*"
+winit-core = "0.31.0-beta.2"
+winit-wayland = "0.31.0-beta.2"

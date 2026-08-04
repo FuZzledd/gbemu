@@ -4,7 +4,7 @@ use better_default::Default;
 use bytemuck::TransparentWrapper;
 use strum::FromRepr;
 
-use chapa::{BitEnum, bitfield};
+use chapa::{bitenum, bitfield};
 
 #[bitfield(u8, order = lsb0, width = 4)]
 #[derive(Default, Copy, Clone, PartialEq, Debug)]
@@ -165,7 +165,8 @@ impl AudioVolume {
     }
 }
 
-#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
+#[bitenum]
+#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum SweepDirection {
     #[default]
@@ -215,7 +216,9 @@ impl ChannelSweep {
         *self = (value | 0b1000_0000).into();
     }
 }
-#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
+
+#[bitenum]
+#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum WaveDuty {
     #[fallback]
@@ -259,7 +262,8 @@ impl ChannelLengthTimerWithDuty {
     }
 }
 
-#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
+#[bitenum]
+#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum EnvelopeDirection {
     #[default]
@@ -418,7 +422,8 @@ impl ChannelVolume {
     }
 }
 
-#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy, BitEnum)]
+#[bitenum]
+#[derive(Default, Debug, FromRepr, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum LfsrWidth {
     #[default]

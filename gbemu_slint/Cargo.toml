@@ -40,8 +40,8 @@ rfd = { workspace = true }
 ringbuf = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-slint = { workspace = true, features = ["backend-qt"] }
-slint_generated = { workspace = true }
+slint = { version = "1.17.0", features = ["backend-qt"] }
+slint_generated = { path = "./slint/" }
 spin_sleep = { workspace = true }
 tap = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
@@ -53,7 +53,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "registry"] }
 uzi = { workspace = true }
 
 [build-dependencies]
-slint-build = { workspace = true }
+slint-build = { version = "1.17.0" }
 
 [features]
 deadlock_detection = ["parking_lot/deadlock_detection"]

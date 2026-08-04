@@ -1,27 +1,51 @@
 #![allow(unused)]
 
 use core::{
+    default,
     iter::Cloned,
     mem,
     ops::{BitAnd, BitOr, Deref, DerefMut, Index, IndexMut, Not, Shl, Shr},
     range::{Range, RangeIter},
     slice,
+    sync::atomic::Ordering,
 };
 use std::process::Output;
 
-use crate::context::{Context, InterruptRegister, Io, Memory, Memory8K, MemoryBus};
+use crate::{
+    BREAKPOINTS, DEBUGGING_ENABLED, HIT_BREAKPOINTS,
+    context::{Context, InterruptRegister, Io, Memory, Memory8K, MemoryBus},
+    debugging::BreakpointData,
+};
 use crate::{bit_getters, get_bit, set_bit};
 use array_deque::{ArrayDeque, StackArrayDeque};
 use better_default::Default;
-use bytemuck::TransparentWrapper;
+use bytemuck::{NoUninit, Pod, TransparentWrapper, Zeroable};
+use chapa::{bitenum, bitfield};
 use paste::paste;
-use strum::FromRepr;
+use strum::{Display, FromRepr};
 use tap::{Pipe, Tap};
 use tracing::instrument;
 
-#[repr(transparent)]
+#[bitfield(u8, order=lsb0)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Lcdc(u8);
+pub struct Lcdc {
+    #[bits(7)]
+    enable: bool,
+    #[bits(6)]
+    window_tile_map: TileMapArea,
+    #[bits(5)]
+    window_enable: bool,
+    #[bits(4)]
+    tile_data_mapping: TileDataMapping,
+    #[bits(3)]
+    bg_tile_map: TileMapArea,
+    #[bits(2)]
+    obj_size: ObjSize,
+    #[bits(1)]
+    obj_enable: bool,
+    #[bits(0)]
+    bg_window_enable: bool,
+}
 
 impl DerefMut for Lcdc {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -36,51 +60,23 @@ impl Deref for Lcdc {
         &self.0
     }
 }
-impl Lcdc {
-    bit_getters!(enable, 7);
 
-    pub fn window_tile_map(&self) -> TileMapArea {
-        TileMapArea::from_repr(get_bit(self.0, 6) as u8).unwrap()
-    }
-
-    fn set_window_tile_map(&mut self, map: TileMapArea) {
-        set_bit(&mut self.0, 6, map as u8 != 0);
-    }
-
-    bit_getters!(window_enable, 5);
-
-    pub fn tile_data_mapping(&self) -> TileDataMapping {
-        TileDataMapping::from_repr(get_bit(self.0, 4) as u8).unwrap()
-    }
-
-    fn set_tile_data_mapping(&mut self, map: TileDataMapping) {
-        set_bit(&mut self.0, 4, map as u8 != 0);
-    }
-
-    pub fn bg_tile_map(&self) -> TileMapArea {
-        TileMapArea::from_repr(get_bit(self.0, 3) as u8).unwrap()
-    }
-
-    fn set_bg_tile_map(&mut self, map: TileMapArea) {
-        set_bit(&mut self.0, 3, map as u8 != 0);
-    }
-
-    fn obj_size(&self) -> ObjSize {
-        ObjSize::from_repr(get_bit(self.0, 2) as u8).unwrap()
-    }
-
-    fn set_obj_size(&mut self, map: ObjSize) {
-        set_bit(&mut self.0, 2, map as u8 != 0);
-    }
-
-    bit_getters!(obj_enable, 1);
-
-    bit_getters!(bg_window_enable, 0);
-}
-
+#[bitfield(u8, order=lsb0)]
 #[derive(Debug, Copy, Clone, Default)]
-#[repr(transparent)]
-pub struct Stat(u8);
+pub struct Stat {
+    #[bits(6)]
+    lyc_select: bool,
+    #[bits(5)]
+    mode_2: bool,
+    #[bits(4)]
+    mode_1: bool,
+    #[bits(3)]
+    mode_0: bool,
+    #[bits(2)]
+    lyc_equal: bool,
+    #[bits(0..=1)]
+    ppu_mode: Mode,
+}
 
 impl DerefMut for Stat {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -93,21 +89,6 @@ impl Deref for Stat {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl Stat {
-    bit_getters!(lyc_select, 6);
-    bit_getters!(mode_2, 5);
-    bit_getters!(mode_1, 4);
-    bit_getters!(mode_0, 3);
-    bit_getters!(lyc_equal, 2);
-    fn ppu_mode(&self) -> Mode {
-        Mode::from_repr(self.0 as usize & 0b11).unwrap()
-    }
-
-    fn set_ppu_mode(&mut self, mode: Mode) {
-        self.0 = (self.0 & !0b11) | (mode as u8 & 0b11);
     }
 }
 
@@ -201,23 +182,29 @@ impl Deref for Vram {
     }
 }
 
+#[bitenum]
 #[derive(Copy, Clone, Debug, FromRepr)]
 #[repr(u8)]
 pub enum TileMapArea {
+    #[fallback]
     Zero,
     One,
 }
 
+#[bitenum]
 #[derive(Copy, Clone, Debug, FromRepr)]
 #[repr(u8)]
 pub enum ObjSize {
+    #[fallback]
     Square,
     Tall,
 }
 
+#[bitenum]
 #[derive(Copy, Clone, Debug, FromRepr)]
 #[repr(u8)]
 pub enum TileDataMapping {
+    #[fallback]
     Zero = 1,
     One = 0,
 }
@@ -332,9 +319,22 @@ impl Oam {
     }
 }
 
+#[bitfield(u8, order=lsb0)]
 #[derive(Debug, Clone, Copy, Default, TransparentWrapper)]
-#[repr(transparent)]
-struct OamAttributes(u8);
+struct OamAttributes {
+    #[bits(7)]
+    priority: bool,
+    #[bits(6)]
+    y_flip: bool,
+    #[bits(5)]
+    x_flip: bool,
+    #[bits(4)]
+    dmg_palette: bool,
+    #[bits(3)]
+    bank: bool,
+    #[bits(0..=2)]
+    cgb_palette: u8,
+}
 
 impl DerefMut for OamAttributes {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -347,21 +347,6 @@ impl Deref for OamAttributes {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl OamAttributes {
-    bit_getters!(priority, 7);
-    bit_getters!(y_flip, 6);
-    bit_getters!(x_flip, 5);
-    bit_getters!(dmg_palette, 4);
-    bit_getters!(bank, 3);
-    fn cgb_palette(&self) -> u8 {
-        self.0 & 0b111
-    }
-    fn set_cgb_palette(&mut self, value: u8) {
-        assert!(value <= 0b111);
-        self.0 = (self.0 & !0b111) | (value & 0b111);
     }
 }
 
@@ -410,9 +395,11 @@ impl OamEntry {
     }
 }
 
-#[derive(Copy, Clone, Debug, FromRepr, PartialEq, Eq, Default)]
+#[bitenum]
+#[derive(Copy, Clone, Debug, FromRepr, PartialEq, Eq, Default, Display)]
 pub enum Mode {
     #[default]
+    #[fallback]
     OamScan = 2,
     PixelTransfer = 3,
 
@@ -427,7 +414,7 @@ struct SpritePixel {
     priority: bool,
 }
 
-#[derive(Debug, Clone, Copy, FromRepr, Default, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, FromRepr, Default, Hash, PartialEq, Eq, NoUninit, Zeroable)]
 #[repr(u8)]
 pub enum Pixel {
     #[default]
@@ -526,8 +513,10 @@ impl PPU {
                 if self.cycle_counter == 455 {
                     if ctx.memory.io.lcd.ly == 143 {
                         self.current_mode = Mode::VBlank;
+                        self.check_breakpoints()
                     } else {
                         self.current_mode = Mode::OamScan;
+                        self.check_breakpoints()
                     }
                     ctx.memory.io.lcd.ly += 1;
                     self.cycle_counter = 0;
@@ -549,6 +538,7 @@ impl PPU {
                         self.current_mode = Mode::OamScan;
                         self.cycle_counter = 0;
                         ctx.memory.io.lcd.ly = 0;
+                        self.check_breakpoints()
                     } else {
                         ctx.memory.io.lcd.ly += 1;
                         self.cycle_counter = 0;
@@ -602,7 +592,8 @@ impl PPU {
             }
         }
         if self.cycle_counter == 79 {
-            self.current_mode = Mode::PixelTransfer
+            self.current_mode = Mode::PixelTransfer;
+            self.check_breakpoints();
         }
     }
 
@@ -902,6 +893,21 @@ impl PPU {
             self.sprite_fetcher_state.y_flip = current_sprite.attributes().y_flip();
             self.sprite_fetcher_state.x_flip = current_sprite.attributes().x_flip();
             self.sprite_fetcher_state.palette = current_sprite.attributes().dmg_palette();
+        }
+    }
+
+    fn check_breakpoints(&mut self) {
+        if DEBUGGING_ENABLED.load(Ordering::Relaxed) {
+            let breakpoints = BREAKPOINTS.lock();
+            let hit_breakpoints = breakpoints
+                .ppu_mode
+                .iter()
+                .filter(|(_, breakpoint)| {
+                    breakpoint.enabled && breakpoint.breakpoint.mode == self.current_mode
+                })
+                .map(|(id, breakpoint)| (*id, BreakpointData::PpuMode(self.current_mode)));
+
+            HIT_BREAKPOINTS.lock().extend(hit_breakpoints);
         }
     }
 }

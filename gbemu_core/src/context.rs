@@ -1,4 +1,4 @@
-use core::{cell::Cell, range::Range};
+use core::{cell::Cell, range::Range, sync::atomic::Ordering};
 use std::{
     ffi::OsString,
     fs,
@@ -20,8 +20,10 @@ use time::UtcDateTime;
 use tracing::{debug, info, warn};
 
 use crate::{
+    BREAKPOINTS, DEBUGGING_ENABLED, HIT_BREAKPOINTS,
     apu::{AudioRegister, AudioRegisters},
     bit_getters,
+    debugging::BreakpointData,
     ppu::{DmaStatus, LCDRegisters, Oam, Vram},
 };
 
@@ -316,24 +318,24 @@ impl InterruptRegister for InterruptFlag {
 
 #[allow(unused)]
 fn unimplemented_io_read(address: u8) -> u8 {
-    info!("Unimplemented read to IO register 0xFF{address:02X}");
+    warn!("Unimplemented read to IO register 0xFF{address:02X}");
     0xFF
 }
 
 #[allow(unused)]
 fn unimplemented_io_write(address: u8, value: u8) {
-    info!("Unimplemented write to IO register 0xFF{address:02X} with value 0x{value:02X}");
+    warn!("Unimplemented write to IO register 0xFF{address:02X} with value 0x{value:02X}");
 }
 
 #[allow(unused)]
 fn unimplemented_mem_read(address: u16) -> u8 {
-    info!("Unimplemented read to address 0x{address:04X}");
+    warn!("Unimplemented read to address 0x{address:04X}");
     0xFF
 }
 
 #[allow(unused)]
 fn unimplemented_mem_write(address: u16, value: u8) {
-    info!("Unimplemented write to to address 0x{address:04X} with value 0x{value:02X}");
+    warn!("Unimplemented write to to address 0x{address:04X} with value 0x{value:02X}");
 }
 
 impl IoRegisters {
@@ -450,15 +452,11 @@ impl Mapper for Mbc0 {
                 warn!(
                     "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
                 );
-                // let _ = PLAYBACK_CONTROLLER.0.send(false);
-            } //self.rom[address as usize] = value,
+            }
             0x4000..=0x7FFF => {
-                // TODO: switchable rom banks
-                //self.rom_banks[0][address as usize - 0x4000] = value
                 warn!(
                     "Attempted to write to ROM at address 0x{address:04X} with value 0x{value:02X}"
                 );
-                // let _ = PLAYBACK_CONTROLLER.0.send(false);
             }
             0xA000..=0xBFFF => self.external_ram[address as usize - 0xA000] = value,
             _ => unreachable!(),
@@ -912,7 +910,43 @@ pub struct MemoryBus {
     pub(crate) ie: u8,
 }
 
-impl MemoryBus {}
+impl MemoryBus {
+    fn read_u8_with_source_no_debug(&self, address: u16, source: MemoryAccessSource) -> u8 {
+        if !matches!(source, MemoryAccessSource::Oam)
+            && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
+            && (matches!(
+                (self.io.lcd.dma_source_address, address),
+                (0x80..=0x9F, 0x8000..=0x9FFF)
+            ) || matches!(
+                (self.io.lcd.dma_source_address, address),
+                (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
+            ))
+        {
+            return 0xFF;
+        }
+        match address {
+            0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.read_u8(address),
+            0x8000..=0x9FFF => self.vram[address as usize - 0x8000],
+            0xC000..=0xCFFF => self.wram1[address as usize - 0xC000],
+            0xD000..=0xDFFF => self.wram2[address as usize - 0xD000],
+            0xE000..=0xEFFF => {
+                //Echo RAM
+                self.wram1[address as usize - 0xE000]
+            }
+            0xF000..=0xFDFF => {
+                //Echo RAM 2
+                self.wram2[address as usize - 0xF000]
+            }
+            0xFE00..=0xFE9F => self.oam[address as usize - 0xFE00],
+            0xFEA0..=0xFEFF => {
+                0x00 // Prohibited Region, on DMG reads return $00
+            }
+            0xFF00..=0xFF7F => self.io.read_u8(address as u8),
+            0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80],
+            0xFFFF => self.ie,
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct Context<M: Memory + Default = MemoryBus> {
@@ -1025,7 +1059,7 @@ impl RomInfo {
     }
 }
 
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MemoryAccessSource {
     #[default]
     Default,
@@ -1058,76 +1092,171 @@ pub trait Memory {
 
 impl Memory for MemoryBus {
     fn read_u8_with_source(&self, address: u16, source: MemoryAccessSource) -> u8 {
-        if !matches!(source, MemoryAccessSource::Oam)
-            && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
-            && (matches!(
-                (self.io.lcd.dma_source_address, address),
-                (0x80..=0x9F, 0x8000..=0x9FFF)
-            ) || matches!(
-                (self.io.lcd.dma_source_address, address),
-                (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
-            ))
-        {
-            return 0xFF;
+        let val = 'read: {
+            if !matches!(source, MemoryAccessSource::Oam)
+                && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
+                && (matches!(
+                    (self.io.lcd.dma_source_address, address),
+                    (0x80..=0x9F, 0x8000..=0x9FFF)
+                ) || matches!(
+                    (self.io.lcd.dma_source_address, address),
+                    (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
+                ))
+            {
+                break 'read 0xFF;
+            }
+            match address {
+                0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.read_u8(address),
+                0x8000..=0x9FFF => self.vram[address as usize - 0x8000],
+                0xC000..=0xCFFF => self.wram1[address as usize - 0xC000],
+                0xD000..=0xDFFF => self.wram2[address as usize - 0xD000],
+                0xE000..=0xEFFF => {
+                    //Echo RAM
+                    self.wram1[address as usize - 0xE000]
+                }
+                0xF000..=0xFDFF => {
+                    //Echo RAM 2
+                    self.wram2[address as usize - 0xF000]
+                }
+                0xFE00..=0xFE9F => self.oam[address as usize - 0xFE00],
+                0xFEA0..=0xFEFF => {
+                    0x00 // Prohibited Region, on DMG reads return $00
+                }
+                0xFF00..=0xFF7F => self.io.read_u8(address as u8),
+                0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80],
+                0xFFFF => self.ie,
+            }
+        };
+
+        if DEBUGGING_ENABLED.load(Ordering::Relaxed) {
+            let breakpoints = BREAKPOINTS.lock();
+
+            let hit_breakpoints = breakpoints
+                .watch_all
+                .iter()
+                .filter(|(_, breakpoint)| {
+                    breakpoint.enabled && breakpoint.breakpoint.addr == address
+                })
+                .map(|(id, breakpoint)| {
+                    (
+                        *id,
+                        BreakpointData::Read {
+                            addr: breakpoint.breakpoint.addr,
+                            value: val,
+                        },
+                    )
+                })
+                .chain(
+                    breakpoints
+                        .watch_read
+                        .iter()
+                        .filter(|(_, breakpoint)| {
+                            breakpoint.enabled && breakpoint.breakpoint.addr == address
+                        })
+                        .map(|(id, breakpoint)| {
+                            (
+                                *id,
+                                BreakpointData::Read {
+                                    addr: breakpoint.breakpoint.addr,
+                                    value: val,
+                                },
+                            )
+                        }),
+                );
+
+            HIT_BREAKPOINTS.lock().extend(hit_breakpoints);
         }
-        match address {
-            0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.read_u8(address),
-            0x8000..=0x9FFF => self.vram[address as usize - 0x8000],
-            0xC000..=0xCFFF => self.wram1[address as usize - 0xC000],
-            0xD000..=0xDFFF => self.wram2[address as usize - 0xD000],
-            0xE000..=0xEFFF => {
-                //Echo RAM
-                self.wram1[address as usize - 0xE000]
-            }
-            0xF000..=0xFDFF => {
-                //Echo RAM 2
-                self.wram2[address as usize - 0xF000]
-            }
-            0xFE00..=0xFE9F => self.oam[address as usize - 0xFE00],
-            0xFEA0..=0xFEFF => {
-                0x00 // Prohibited Region, on DMG reads return $00
-            }
-            0xFF00..=0xFF7F => self.io.read_u8(address as u8),
-            0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80],
-            0xFFFF => self.ie,
-        }
+
+        val
     }
 
     fn write_u8_with_source(&mut self, address: u16, value: u8, source: MemoryAccessSource) {
-        if !matches!(source, MemoryAccessSource::Oam)
-            && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
-            && (matches!(
-                (self.io.lcd.dma_source_address, address),
-                (0x80..=0x9F, 0x8000..=0x9FFF)
-            ) || matches!(
-                (self.io.lcd.dma_source_address, address),
-                (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
-            ))
-        {
-            return;
+        let mut prev_value: Option<u8> = None;
+
+        if DEBUGGING_ENABLED.load(Ordering::Relaxed) {
+            prev_value = Some(self.read_u8_with_source_no_debug(address, source))
         }
-        match address {
-            0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.write_u8(address, value),
-            0x8000..=0x9FFF => self.vram[address as usize - 0x8000] = value,
-            0xC000..=0xCFFF => self.wram1[address as usize - 0xC000] = value,
-            0xD000..=0xDFFF => self.wram2[address as usize - 0xD000] = value,
-            0xE000..=0xEFFF => {
-                //Echo RAM
-                self.wram1[address as usize - 0xE000] = value
+
+        'write: {
+            if !matches!(source, MemoryAccessSource::Oam)
+                && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
+                && (matches!(
+                    (self.io.lcd.dma_source_address, address),
+                    (0x80..=0x9F, 0x8000..=0x9FFF)
+                ) || matches!(
+                    (self.io.lcd.dma_source_address, address),
+                    (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
+                ))
+            {
+                break 'write;
             }
-            0xF000..=0xFDFF => {
-                //Echo RAM 2
-                self.wram2[address as usize - 0xF000] = value
+            match address {
+                0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.write_u8(address, value),
+                0x8000..=0x9FFF => self.vram[address as usize - 0x8000] = value,
+                0xC000..=0xCFFF => self.wram1[address as usize - 0xC000] = value,
+                0xD000..=0xDFFF => self.wram2[address as usize - 0xD000] = value,
+                0xE000..=0xEFFF => {
+                    //Echo RAM
+                    self.wram1[address as usize - 0xE000] = value
+                }
+                0xF000..=0xFDFF => {
+                    //Echo RAM 2
+                    self.wram2[address as usize - 0xF000] = value
+                }
+                0xFE00..=0xFE9F => self.oam[address as usize - 0xFE00] = value,
+                0xFEA0..=0xFEFF => {
+                    // todo!("Prohibited region, implement undefined behaviour")
+                }
+                0xFF00..=0xFF7F => {
+                    self.io.write_u8(address as u8, value);
+                }
+                0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80] = value,
+                0xFFFF => self.ie = value,
             }
-            0xFE00..=0xFE9F => self.oam[address as usize - 0xFE00] = value,
-            0xFEA0..=0xFEFF => {
-                // todo!("Prohibited region, implement undefined behaviour")
-            }
-            0xFF00..=0xFF7F => {
-                self.io.write_u8(address as u8, value);
-            }
-            0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80] = value,
-            0xFFFF => self.ie = value,
+        }
+        if DEBUGGING_ENABLED.load(Ordering::Relaxed) {
+            let new_value = self.read_u8_with_source_no_debug(address, source);
+            let breakpoints = BREAKPOINTS.lock();
+            let prev_value = prev_value.unwrap();
+
+            let hit_breakpoints = breakpoints
+                .watch_all
+                .iter()
+                .filter(|(_, breakpoint)| {
+                    breakpoint.enabled && breakpoint.breakpoint.addr == address
+                })
+                .map(|(id, breakpoint)| {
+                    (
+                        *id,
+                        BreakpointData::Write {
+                            addr: breakpoint.breakpoint.addr,
+                            prev_value,
+                            written_value: value,
+                            new_value,
+                        },
+                    )
+                })
+                .chain(
+                    breakpoints
+                        .watch_write
+                        .iter()
+                        .filter(|(_, breakpoint)| {
+                            breakpoint.enabled && breakpoint.breakpoint.addr == address
+                        })
+                        .map(|(id, breakpoint)| {
+                            (
+                                *id,
+                                BreakpointData::Write {
+                                    addr: breakpoint.breakpoint.addr,
+                                    prev_value,
+                                    written_value: value,
+                                    new_value,
+                                },
+                            )
+                        }),
+                );
+
+            HIT_BREAKPOINTS.lock().extend(hit_breakpoints);
         }
     }
 

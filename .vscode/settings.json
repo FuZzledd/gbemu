@@ -1,7 +1,12 @@
 {
-    "git.ignoreLimitWarning": true,
-    "git.enabled": false,
-    "rust-analyzer.cargo.extraEnv": {
-        "SLINT_ENABLE_EXPERIMENTAL_FEATURES": "1"
-    }
+  "git.ignoreLimitWarning": true,
+  "git.enabled": false,
+  "rust-analyzer.cargo.extraEnv": {
+    "SLINT_ENABLE_EXPERIMENTAL_FEATURES": "1"
+  },
+  "tailwindCSS.experimental.classRegex": ["class: \"(.*)\""],
+  "tailwindCSS.includeLanguages": {
+    "rust": "html"
+  }
 }
+

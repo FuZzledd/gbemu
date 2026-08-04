@@ -1,6 +1,9 @@
+use bytes::BytesMut;
 use datatest_stable::Utf8Path;
-use gbemu_core::GameBoy;
+use gbemu_core::{GameBoy, Palette, ppu};
+use rgb::Gray;
 use ringbuf::traits::Consumer;
+use tap::{Conv, Tap};
 
 mod common;
 
@@ -10,13 +13,13 @@ datatest_stable::harness! {
 
 fn test_cpu_instrs(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()> {
     let mut gameboy: GameBoy = GameBoy::default();
-    gameboy.load_rom(path);
+    gameboy.load_rom(path).unwrap();
 
     let mut output = Vec::new();
 
     let status = loop {
         loop {
-            let redraw = gameboy.tick(false);
+            let redraw = gameboy.tick(true).should_redraw();
             gameboy
                 .context
                 .memory
@@ -38,7 +41,7 @@ fn test_cpu_instrs(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()
 
     for _ in 0..4 {
         loop {
-            let redraw = gameboy.tick(false);
+            let redraw = gameboy.tick(false).should_redraw();
             gameboy
                 .context
                 .memory
@@ -52,8 +55,14 @@ fn test_cpu_instrs(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()
         }
     }
 
-    let image =
-        common::inline_iterm2_image_from_buffer(gameboy.buffer.clone(), path.file_name().unwrap());
+    let palette = Palette::default();
+    let buffer: BytesMut = gameboy
+        .get_screen()
+        .iter()
+        .flat_map(|pixel| palette[pixel].conv::<[u8; 4]>())
+        .collect();
+
+    let image = common::inline_iterm2_image_from_buffer(buffer, path.file_name().unwrap());
 
     println!("Result\n {image}",);
 
