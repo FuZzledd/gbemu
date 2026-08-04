@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize, de::Visitor};
 use std::str::FromStr;
 
 #[cfg(feature = "gpui")]
-use gpui::{Hsla, Rgba, rgb, rgba};
+use gpui::{Hsla, Rgba, rgba};
 use palette::stimulus::IntoStimulus;
 
 #[derive(Bake, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

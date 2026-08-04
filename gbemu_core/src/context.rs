@@ -4,12 +4,11 @@ use std::{
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
-    time::Instant,
 };
 
 use better_default::Default;
 use bitvec::{access::BitSafe, prelude::*};
-use bytemuck::{NoUninit, Pod, TransparentWrapper, from_bytes};
+use bytemuck::{Pod, TransparentWrapper, from_bytes};
 use rgb::Zeroable;
 use ringbuf::{StaticRb, traits::RingBuffer};
 use spire_enum::prelude::{delegate_impl, delegated_enum};
@@ -17,7 +16,7 @@ use strum::FromRepr;
 use tap::Pipe;
 use thiserror::Error;
 use time::UtcDateTime;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::{
     BREAKPOINTS, DEBUGGING_ENABLED, HIT_BREAKPOINTS,

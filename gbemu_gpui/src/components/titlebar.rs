@@ -95,7 +95,7 @@ impl RenderOnce for TitleBar {
                     drag_task.write(cx, None);
                 }),
             )
-            .on_mouse_down(MouseButton::Right, |event, window, cx| {
+            .on_mouse_down(MouseButton::Right, |event, window, _cx| {
                 window.show_window_menu(event.position);
             })
             .children(self.children)
@@ -114,10 +114,10 @@ impl RenderOnce for TitleBar {
                             (self.id.clone(), "titlebar-minimize"),
                         )
                         .window_control_area(WindowControlArea::Max)
-                        .on_any_mouse_down(|event, window, cx| {
+                        .on_any_mouse_down(|_event, _window, cx| {
                             cx.stop_propagation();
                         })
-                        .on_click(|event, window, cx| {
+                        .on_click(|_event, window, cx| {
                             cx.stop_propagation();
                             window.minimize_window();
                         })
@@ -139,10 +139,10 @@ impl RenderOnce for TitleBar {
                             (self.id.clone(), "titlebar-maximize"),
                         )
                         .window_control_area(WindowControlArea::Max)
-                        .on_any_mouse_down(|event, window, cx| {
+                        .on_any_mouse_down(|_event, _window, cx| {
                             cx.stop_propagation();
                         })
-                        .on_click(|event, window, cx| {
+                        .on_click(|_event, window, cx| {
                             cx.stop_propagation();
                             window.zoom_window();
                         })
@@ -169,16 +169,16 @@ impl RenderOnce for TitleBar {
                         )
                         .hover_background(red)
                         .window_control_area(WindowControlArea::Close)
-                        .on_any_mouse_down(|event, window, cx| {
+                        .on_any_mouse_down(|_event, _window, cx| {
                             cx.stop_propagation();
                         })
-                        .on_click(|event, window, cx| {
+                        .on_click(|_event, window, cx| {
                             cx.stop_propagation();
                             window
                                 .root::<Root>()
                                 .unwrap()
                                 .unwrap()
-                                .update(cx, |root, cx| {
+                                .update(cx, |_root, cx| {
                                     cx.emit(CloseRequestEvent);
                                 })
                         })

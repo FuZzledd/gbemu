@@ -20,6 +20,12 @@ impl MenuBar {
     }
 }
 
+impl Default for MenuBar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 actions!(menubar, [CloseMenus]);
 
 type OpenedMenuPopup = (Bounds<Pixels>, OwnedMenu);
@@ -30,7 +36,7 @@ impl Render for MenuBar {
 
         let background = theme.palette.darker_background();
 
-        let hover_background = theme.palette.background();
+        let _hover_background = theme.palette.background();
 
         let foreground = theme.palette.foreground();
 
@@ -42,7 +48,7 @@ impl Render for MenuBar {
         let element_id = ElementId::from(("menubar", entity_id));
 
         let current_popup: Entity<Option<(Bounds<Pixels>, OwnedMenu)>> =
-            window.use_state(cx, |window, cx| None);
+            window.use_state(cx, |_window, _cx| None);
 
         let entity = cx.entity();
 
@@ -71,7 +77,7 @@ impl Render for MenuBar {
 
         cx.subscribe_self(using!(
             [current_popup],
-            move |this, _: &DismissEvent, cx| {
+            move |_this, _: &DismissEvent, cx| {
                 current_popup.write(cx, None);
             }
         ))
@@ -80,7 +86,7 @@ impl Render for MenuBar {
         let viewport_size = window.viewport_size();
 
         div()
-            .on_mouse_down_out(using!([menu_bounds, entity], move |event, window, cx| {
+            .on_mouse_down_out(using!([menu_bounds, entity], move |event, _window, cx| {
                 let mouse_pos = event.position;
 
                 if menu_bounds
@@ -88,7 +94,7 @@ impl Render for MenuBar {
                     .iter()
                     .all(|bounds| !bounds.contains(&mouse_pos))
                 {
-                    entity.update(cx, |this, cx| {
+                    entity.update(cx, |_this, cx| {
                         cx.emit(DismissEvent);
                     })
                 }
@@ -177,7 +183,7 @@ impl StatefulInteractiveElement for MenuBarButton {}
 impl RenderOnce for MenuBarButton {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let bounds =
-            window.use_keyed_state((self.id.clone(), "bounds_reporter"), cx, |window, cx| {
+            window.use_keyed_state((self.id.clone(), "bounds_reporter"), cx, |_window, _cx| {
                 Bounds::default()
             });
 
@@ -187,9 +193,9 @@ impl RenderOnce for MenuBarButton {
 
         let hover_background = theme.palette.background();
 
-        let foreground = theme.palette.foreground();
+        let _foreground = theme.palette.foreground();
 
-        let border = theme.palette.gray();
+        let _border = theme.palette.gray();
 
         drop(theme);
 
@@ -214,7 +220,7 @@ impl RenderOnce for MenuBarButton {
                         MouseButton::Left,
                         using!(
                             [self.menu, self.current_root_menu, bounds],
-                            move |event, window, cx| {
+                            move |_event, _window, cx| {
                                 let bounds = *bounds.read(cx);
 
                                 current_root_menu.write(cx, Some((bounds, menu.clone())));
@@ -223,10 +229,10 @@ impl RenderOnce for MenuBarButton {
                     )
                     .on_hover(using!(
                         [self.menu, self.current_root_menu, bounds],
-                        move |event, window, cx| {
+                        move |_event, _window, cx| {
                             let bounds = *bounds.read(cx);
 
-                            current_root_menu.update(cx, |current_menu, cx| {
+                            current_root_menu.update(cx, |current_menu, _cx| {
                                 if let Some(current_menu) = current_menu {
                                     *current_menu = (bounds, menu.clone());
                                 }
@@ -320,9 +326,9 @@ impl RenderOnce for MenuPopup {
 
         let background = theme.palette.darker_background();
 
-        let hover_background = theme.palette.background();
+        let _hover_background = theme.palette.background();
 
-        let foreground = theme.palette.foreground();
+        let _foreground = theme.palette.foreground();
 
         let border = theme.palette.gray();
 
@@ -332,7 +338,7 @@ impl RenderOnce for MenuPopup {
 
         current_menu.update(
             cx,
-            using!([self.menu], move |current_menu, cx| {
+            using!([self.menu], move |current_menu, _cx| {
                 if let Some((_, current_menu)) = current_menu
                     && let Some(menu) = menu.items.into_iter().find_map(|menu| match menu {
                         OwnedMenuItem::Submenu(owned_menu) => Some(owned_menu),
@@ -371,7 +377,7 @@ impl RenderOnce for MenuPopup {
                     ),
                 })
             }))
-            .on_bounds_paint(using!([self.menu_bounds], move |bounds, window, cx| {
+            .on_bounds_paint(using!([self.menu_bounds], move |bounds, _window, cx| {
                 menu_bounds.as_mut(cx).push(bounds);
             }))
             .when_some(
@@ -453,9 +459,9 @@ impl RenderOnce for PopupMenuItem {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.global::<ThemeRegistry>().current_theme();
 
-        let background = theme.palette.darker_background();
+        let _background = theme.palette.darker_background();
 
-        let hover_background = theme.palette.background();
+        let _hover_background = theme.palette.background();
 
         let foreground = theme.palette.foreground();
         let darker_foreground = theme.palette.dark_foreground();
@@ -476,14 +482,14 @@ impl RenderOnce for PopupMenuItem {
             OwnedMenuItem::Submenu(owned_menu) => {
                 let OwnedMenu {
                     name,
-                    items,
-                    disabled,
+                    items: _,
+                    disabled: _,
                 } = owned_menu.clone();
 
                 let button_bounds = window.use_keyed_state(
                     (self.id.clone().unwrap(), "submenu_bounds"),
                     cx,
-                    |window, cx| Bounds::<Pixels>::default(),
+                    |_window, _cx| Bounds::<Pixels>::default(),
                 );
 
                 Button::new(
@@ -492,7 +498,7 @@ impl RenderOnce for PopupMenuItem {
                 )
                 .on_hover(using!(
                     [self.current_menu, button_bounds],
-                    move |&hover_status, window, cx| {
+                    move |&hover_status, _window, cx| {
                         if let Some(current_menu) = &current_menu
                             && hover_status
                         {
@@ -516,7 +522,7 @@ impl RenderOnce for PopupMenuItem {
                         .size_6()
                         .text_color(foreground),
                 )
-                .on_bounds_prepaint(using!([button_bounds], move |bounds, window, cx| {
+                .on_bounds_prepaint(using!([button_bounds], move |bounds, _window, cx| {
                     button_bounds.write(cx, bounds);
                 }))
                 .into_any_element()
@@ -557,13 +563,13 @@ impl RenderOnce for PopupMenuItem {
                     |this| {
                         this.on_mouse_down(
                             MouseButton::Left,
-                            using!([], move |event, window, cx| {
+                            using!([], move |_event, window, cx| {
                                 let name = action.name();
 
                                 window.dispatch_action(action.boxed_clone(), cx);
 
                                 if !name.to_lowercase().contains("toggle") {
-                                    current_root_menu.update(cx, |this, cx| {
+                                    current_root_menu.update(cx, |this, _cx| {
                                         *this = None;
                                     })
                                 }
@@ -620,7 +626,7 @@ impl RenderOnce for PopupMenuItem {
                 .overflow_x_hidden()
                 .on_hover(using!(
                     [self.current_menu],
-                    move |&hover_status, window, cx| {
+                    move |&hover_status, _window, cx| {
                         if let Some(current_menu) = &current_menu
                             && hover_status
                         {

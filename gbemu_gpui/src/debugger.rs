@@ -25,7 +25,7 @@ pub struct Debugger {
 
 impl Debugger {
     pub fn open(
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut App,
     ) -> std::result::Result<gpui::WindowHandle<Root>, gpui::private::anyhow::Error> {
         let bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
@@ -46,7 +46,7 @@ impl Debugger {
         Root::new(Self::new(window, cx), window, cx)
     }
 
-    pub fn new(window: &mut Window, cx: &mut App) -> Entity<Self> {
+    pub fn new(_window: &mut Window, cx: &mut App) -> Entity<Self> {
         let entity = cx.new(|cx| Self {
             text_input_state: cx.new(|cx| EditableTextState::new(StringStorage::default(), cx)),
             output: vec![],
@@ -85,7 +85,7 @@ impl Debugger {
             }
         }));
 
-        cx.observe_release(&entity, |this, cx| {
+        cx.observe_release(&entity, |_this, cx| {
             DEBUGGING_ENABLED.store(false, Ordering::Relaxed);
             cx.global_mut::<WindowMap>().remove(&WindowType::Debugger);
         })
@@ -98,7 +98,7 @@ impl Debugger {
 }
 
 impl Render for Debugger {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity_id = cx.entity_id();
         let element_id = ElementId::from(("debugger", entity_id));
 
@@ -161,7 +161,7 @@ impl Render for Debugger {
                             .child(
                                 list(
                                     self.output_list_state.clone(),
-                                    cx.processor(move |this, idx, window, cx| {
+                                    cx.processor(move |this, idx, _window, cx| {
                                         div()
                                             .px_2()
                                             .text_color(foreground)
@@ -201,7 +201,7 @@ impl Render for Debugger {
                             )
                             .capture_action::<editable_text::actions::Enter>(cx.listener(using!(
                                 [self.text_input_state],
-                                move |this, action, window, cx| {
+                                move |this, _action, _window, cx| {
                                     let input =
                                         text_input_state.update(cx, |text_input_state, cx| {
                                             let input = text_input_state.as_str().to_string();
@@ -245,7 +245,7 @@ fn styled_output_to_text(styled_text_output: &StyledTextOutput, cx: &mut App) ->
         |(mut built_text, mut highlights), text| {
             match text {
                 CoreStyledText::Default(text) => {
-                    built_text.push_str(&text);
+                    built_text.push_str(text);
                 }
                 CoreStyledText::Styled(styled) => {
                     use gbemu_core::debugging::TextStyle;

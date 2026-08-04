@@ -92,7 +92,7 @@ pub struct APU {
 }
 
 impl APU {
-    pub fn create_support(&mut self, ctx: &mut Context<MemoryBus>) -> APUSupport {
+    pub fn create_support(&mut self, _ctx: &mut Context<MemoryBus>) -> APUSupport {
         let support = APUSupport {
             output_channel: self.output_channel.0.clone(),
             input_receiver: self.buffer_channel.1.clone(),

@@ -10,7 +10,7 @@ pub struct Root {
 
 impl Root {
     pub fn new(view: impl Into<AnyView>, window: &mut Window, cx: &mut App) -> Entity<Self> {
-        let entity = cx.new(|cx| Self {
+        let entity = cx.new(|_cx| Self {
             view: view.into(),
             on_close_request: Box::new(|window, _cx| {
                 window.remove_window();
@@ -22,7 +22,7 @@ impl Root {
                 .root::<Root>()
                 .unwrap()
                 .unwrap()
-                .update(cx, |root, cx| {
+                .update(cx, |_root, cx| {
                     cx.emit(CloseRequestEvent);
                 });
 

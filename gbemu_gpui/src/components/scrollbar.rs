@@ -13,7 +13,7 @@ pub struct Scrollbar {
 impl RenderOnce for Scrollbar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let viewport_bounds =
-            window.use_keyed_state((self.id.clone(), "viewport_bounds"), cx, |window, cx| {
+            window.use_keyed_state((self.id.clone(), "viewport_bounds"), cx, |_window, _cx| {
                 Bounds::default()
             });
 
@@ -44,7 +44,7 @@ impl RenderOnce for Scrollbar {
                     .w_2()
                     .rounded_xl(),
             )
-            .on_bounds_prepaint(using!([viewport_bounds], move |bounds, window, cx| {
+            .on_bounds_prepaint(using!([viewport_bounds], move |bounds, _window, cx| {
                 viewport_bounds.write(cx, bounds);
             }))
     }

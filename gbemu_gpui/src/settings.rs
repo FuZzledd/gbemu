@@ -6,7 +6,7 @@ use crate::{components::root::Root, reload_keys};
 use better_default::Default;
 use convert_case::Casing;
 use etcetera::AppStrategy;
-use gbemu_common::theme::{Color, Theme};
+use gbemu_common::theme::Color;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_elements::editable_text::{EditableTextState, StringStorage, text_input};
@@ -23,7 +23,7 @@ use std::{
 };
 use std::{collections::HashMap, fs};
 use std::{fmt::Debug, path::PathBuf};
-use tap::{Conv, Pipe, Tap};
+use tap::{Conv, Tap};
 use uzi::using;
 
 #[macro_export]
@@ -266,7 +266,7 @@ pub struct SettingsWindow {
 
 impl SettingsWindow {
     pub fn open(
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut App,
     ) -> std::result::Result<gpui::WindowHandle<Root>, gpui::private::anyhow::Error> {
         let bounds = Bounds::centered(None, size(px(1200.), px(800.0)), cx);
@@ -286,7 +286,7 @@ impl SettingsWindow {
     pub fn create_root(window: &mut Window, cx: &mut App) -> Entity<Root> {
         let settings_window = Self::new(window, cx);
         let root = Root::new(settings_window.clone(), window, cx);
-        root.update(cx, |root, cx| {
+        root.update(cx, |root, _cx| {
             root.on_close_request(move |window, cx| {
                 settings_window.update(cx, |this, cx| {
                     if this.settings.read(cx) != cx.global::<Settings>() {
@@ -301,7 +301,7 @@ impl SettingsWindow {
                         cx.spawn(async move |weak_this, cx| {
                             let answer = answer.await.unwrap_or(0);
                             if answer == 1 {
-                                cx.with_window(weak_this.entity_id(), |window, cx| {
+                                cx.with_window(weak_this.entity_id(), |window, _cx| {
                                     window.remove_window();
                                 })
                                 .unwrap();
@@ -317,19 +317,19 @@ impl SettingsWindow {
         root
     }
 
-    pub fn new(window: &mut Window, cx: &mut App) -> Entity<Self> {
+    pub fn new(_window: &mut Window, cx: &mut App) -> Entity<Self> {
         let settings = cx.new(|cx| cx.global::<Settings>().clone());
 
         let input = AnyView::from(InputSettingsTab::new(settings.clone(), cx));
         let emulator = AnyView::from(EmulatorSettingsTab::new(settings.clone(), cx));
 
-        let entity = cx.new(|cx| Self {
+        let entity = cx.new(|_cx| Self {
             settings,
             input,
             emulator,
         });
 
-        cx.observe_release(&entity, |this, cx| {
+        cx.observe_release(&entity, |_this, cx| {
             cx.global_mut::<WindowMap>().remove(&WindowType::Settings);
         })
         .detach();
@@ -349,10 +349,10 @@ impl Render for SettingsWindow {
 
         let lighter_background = theme.palette.lighter_background();
         let darker_background = theme.palette.darker_background();
-        let darkest_background = theme.palette.darkest_background();
+        let _darkest_background = theme.palette.darkest_background();
         let background = theme.palette.background();
-        let dark_foreground = theme.palette.dark_foreground();
-        let foreground = theme.palette.foreground();
+        let _dark_foreground = theme.palette.dark_foreground();
+        let _foreground = theme.palette.foreground();
         let lighter_blue = theme.palette.blue();
         let blue = Srgba::<f32>::from_format(Srgba::from(lighter_blue))
             .darken(0.2)
@@ -366,7 +366,7 @@ impl Render for SettingsWindow {
 
         cx.observe(
             &self.settings,
-            using!([unsaved_changes], move |this, settings, cx| {
+            using!([unsaved_changes], move |_this, settings, cx| {
                 unsaved_changes.write(cx, settings.read(cx) != cx.global::<Settings>());
             }),
         )
@@ -420,7 +420,7 @@ impl Render for SettingsWindow {
                             .py(rems(0.1))
                             .rounded_sm()
                             .child("Close")
-                            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                            .on_click(cx.listener(move |_this, event: &ClickEvent, window, cx| {
                                 if event.standard_click() {
                                     window.root::<Root>().unwrap().unwrap().update(cx, |_, cx| {
                                         cx.emit(CloseRequestEvent);
@@ -440,7 +440,7 @@ impl Render for SettingsWindow {
                                 *unsaved_changes.read(cx),
                                 using!([unsaved_changes], |this| {
                                     this.on_click(cx.listener(
-                                        move |this, event: &ClickEvent, window, cx| {
+                                        move |this, event: &ClickEvent, _window, cx| {
                                             if event.standard_click() {
                                                 let settings = this.settings.read(cx).clone();
                                                 let settings_path = cx
@@ -486,14 +486,14 @@ impl EmulatorSettingsTab {
 }
 
 impl Render for EmulatorSettingsTab {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity_id = cx.entity_id();
         let element_id = ElementId::from(("emulator_settings", entity_id));
 
         let theme = cx.global::<ThemeRegistry>().current_theme();
         let foreground = theme.palette.foreground();
         let border = theme.palette.gray();
-        let background = theme.palette.background();
+        let _background = theme.palette.background();
         let darker_background = theme.palette.darker_background();
 
         drop(theme);
@@ -642,13 +642,13 @@ impl InputSettingsTab {
 }
 
 impl Render for InputSettingsTab {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let keybinds = &self.settings.read(cx).input.keybinds;
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let _keybinds = &self.settings.read(cx).input.keybinds;
 
         let theme = cx.global::<ThemeRegistry>().current_theme();
         let foreground = theme.palette.foreground();
-        let border = theme.palette.gray();
-        let background = theme.palette.background();
+        let _border = theme.palette.gray();
+        let _background = theme.palette.background();
         drop(theme);
 
         div()
@@ -656,7 +656,7 @@ impl Render for InputSettingsTab {
             .child(
                 list(
                     self.list_state.clone(),
-                    using!([self.bind_sections], move |idx, window, cx| {
+                    using!([self.bind_sections], move |idx, _window, _cx| {
                         div()
                             .w_full()
                             .text_color(foreground)
@@ -709,10 +709,10 @@ impl InputSection {
 impl Render for InputSection {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.global::<ThemeRegistry>().current_theme();
-        let foreground = theme.palette.foreground();
+        let _foreground = theme.palette.foreground();
         let border = theme.palette.gray();
-        let background = theme.palette.background();
-        let lighter_background = theme.palette.lighter_background();
+        let _background = theme.palette.background();
+        let _lighter_background = theme.palette.lighter_background();
 
         drop(theme);
 
@@ -791,15 +791,15 @@ fn render_bind(
     cx: &mut App,
 ) -> Div {
     let theme = cx.global::<ThemeRegistry>().current_theme();
-    let foreground = theme.palette.foreground();
-    let border = theme.palette.gray();
-    let background = theme.palette.background();
+    let _foreground = theme.palette.foreground();
+    let _border = theme.palette.gray();
+    let _background = theme.palette.background();
     let lighter_background = theme.palette.lighter_background();
 
     drop(theme);
 
     let name = bind.0;
-    let bindable = window.use_keyed_state((element_id, name), cx, |window, cx| {
+    let bindable = window.use_keyed_state((element_id, name), cx, |_window, cx| {
         BindableButton::new(bind.1.clone(), settings, cx)
     });
 
@@ -850,15 +850,15 @@ impl Render for BindableButton {
         let element_id = ElementId::from(("bindable", entity_id));
 
         let theme = cx.global::<ThemeRegistry>().current_theme();
-        let foreground = theme.palette.foreground();
+        let _foreground = theme.palette.foreground();
         let border = theme.palette.gray();
-        let background = theme.palette.background();
-        let lighter_background = theme.palette.lighter_background();
+        let _background = theme.palette.background();
+        let _lighter_background = theme.palette.lighter_background();
 
         drop(theme);
 
         let button_text =
-            window.use_keyed_state((element_id.clone(), "button_text"), cx, |window, cx| {
+            window.use_keyed_state((element_id.clone(), "button_text"), cx, |_window, cx| {
                 self.settings
                     .read(cx)
                     .input
@@ -918,7 +918,7 @@ impl Render for BindableButton {
                         this.is_binding = true;
                         this.binding_timer = Some(cx.spawn(async move |this, cx| {
                             cx.background_executor().timer(Duration::from_secs(3)).await;
-                            this.update(cx, |this, cx| {
+                            this.update(cx, |this, _cx| {
                                 this.is_binding = false;
                             })
                             .unwrap();
@@ -926,7 +926,7 @@ impl Render for BindableButton {
                     }
                 }
             )))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
                 if this.is_binding {
                     this.settings.update(cx, |settings, cx| {
                         settings.input.keybinds.insert(
@@ -940,7 +940,7 @@ impl Render for BindableButton {
                     cx.notify();
                 }
             }))
-            .on_key_up(cx.listener(|this, event: &KeyUpEvent, window, cx| {
+            .on_key_up(cx.listener(|_this, _event: &KeyUpEvent, _window, _cx| {
                 // println!("{event:?}")
             }))
             .focusable()
@@ -985,16 +985,16 @@ impl RenderOnce for TabBar {
             .map(|Tab { name, content }| (name, content))
             .unzip();
 
-        let current_tab_index = window.use_keyed_state(self.id.clone(), cx, |window, cx| 0usize);
+        let current_tab_index = window.use_keyed_state(self.id.clone(), cx, |_window, _cx| 0usize);
 
         let theme = cx.global::<ThemeRegistry>().current_theme();
 
-        let lighter_background = theme.palette.lighter_background();
-        let darker_background = theme.palette.darker_background();
+        let _lighter_background = theme.palette.lighter_background();
+        let _darker_background = theme.palette.darker_background();
         let darkest_background = theme.palette.darkest_background();
         let background = theme.palette.background();
-        let dark_foreground = theme.palette.dark_foreground();
-        let foreground = theme.palette.foreground();
+        let _dark_foreground = theme.palette.dark_foreground();
+        let _foreground = theme.palette.foreground();
 
         let border = theme.palette.gray();
 
@@ -1040,7 +1040,7 @@ impl RenderOnce for TabBar {
                                 |this| this.background(background).border_b_0(),
                                 |this| this.background(darkest_background).border_b_1(),
                             )
-                            .on_click(using!([current_tab_index], move |event, window, cx| {
+                            .on_click(using!([current_tab_index], move |_event, _window, cx| {
                                 current_tab_index.write(cx, idx);
                             }))
                             .relative()

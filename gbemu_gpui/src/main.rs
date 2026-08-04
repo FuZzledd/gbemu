@@ -21,14 +21,13 @@ use ringbuf::{
 };
 use serde::Serialize;
 use spire_enum::prelude::*;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::ops::{Deref, DerefMut};
 use std::{
     env, fs,
     io::{BufWriter, Write},
-    mem,
     path::PathBuf,
     sync::Arc,
     thread,
@@ -37,7 +36,6 @@ use std::{
 use strum::{EnumIter, EnumString};
 use tap::{Conv, Tap};
 use tracing::error;
-use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*, registry::Registry};
 
 pub mod actions;
@@ -116,7 +114,7 @@ impl AppStrategy for EtceteraStrategy {
 }
 
 thread_local! {
-    pub static APP: Cell<Option<AsyncApp>> = Cell::new(None);
+    pub static APP: Cell<Option<AsyncApp>> = const { Cell::new(None) };
 }
 
 fn main() -> Result<()> {
@@ -325,7 +323,7 @@ fn main() -> Result<()> {
 
                         cx.on_action::<actions::file::CloseRom>(using!(
                             [gameboy, recent, recent_path, view],
-                            move |_a, cx| {}
+                            move |_a, _cx| {}
                         ));
 
                         Root::new(view, window, cx)
@@ -339,13 +337,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-use crate::settings::{SerializableAction, Settings};
+use crate::settings::Settings;
 use crate::{
     assets::Icons, components::menubar::MenuBar, debugger::Debugger, screen::Screen,
     settings::SettingsWindow,
 };
 use crate::{components::titlebar::TitleBar, theme::ThemeRegistry};
-use gbemu_core::ppu::Pixel;
 use uzi::using;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
@@ -710,12 +707,12 @@ impl MainWindow {
                         }
                         PlaybackMessage::StepTick(ticks) => {
                             if let Some(entity) = weak_entity.upgrade() {
-                                entity.update(cx, |this, cx| this.step_tick(ticks));
+                                entity.update(cx, |this, _cx| this.step_tick(ticks));
                             }
                         }
                         PlaybackMessage::StepFrame(frames) => {
                             if let Some(entity) = weak_entity.upgrade() {
-                                entity.update(cx, |this, cx| this.step_frame(frames));
+                                entity.update(cx, |this, _cx| this.step_frame(frames));
                             }
                         }
                     },
@@ -865,7 +862,7 @@ impl Render for MainWindow {
             .items_stretch()
             .when(!window.is_fullscreen(), |this| {
                 this.child(
-                    TitleBar::new(("titlebar", self_entity_id.clone()))
+                    TitleBar::new(("titlebar", self_entity_id))
                         .flex()
                         .items_stretch()
                         .content_center()
@@ -884,7 +881,7 @@ impl Render for MainWindow {
             }))
             .child(
                 div()
-                    .id(("screen", self_entity_id.clone()))
+                    .id(("screen", self_entity_id))
                     .flex()
                     .flex_grow()
                     .child(
@@ -930,11 +927,8 @@ impl Render for MainWindow {
 
                                 this.gameboy.lock().set_joypad_state(button, false);
                             } else if name.starts_with("playback") {
-                                match name {
-                                    "playback::FastForward" => {
-                                        cx.global_mut::<GlobalState>().fast_forward_held = true;
-                                    }
-                                    _ => return,
+                                if name == "playback::FastForward" {
+                                    cx.global_mut::<GlobalState>().fast_forward_held = true;
                                 }
                             }
                         }
@@ -971,14 +965,11 @@ impl Render for MainWindow {
 
                             this.gameboy.lock().set_joypad_state(button, true);
                         } else if name.starts_with("playback") {
-                            match name {
-                                "playback::FastForward" => {
-                                    cx.global_mut::<GlobalState>().fast_forward_held = false;
-                                    this.audio_controller_sender
-                                        .send(AudioControllerMessage::ClearBuffer)
-                                        .unwrap();
-                                }
-                                _ => return,
+                            if name == "playback::FastForward" {
+                                cx.global_mut::<GlobalState>().fast_forward_held = false;
+                                this.audio_controller_sender
+                                    .send(AudioControllerMessage::ClearBuffer)
+                                    .unwrap();
                             }
                         }
                     }
@@ -990,7 +981,7 @@ impl Render for MainWindow {
                     window.dispatch_action(Box::new(actions::file::OpenRomPath(path.clone())), cx)
                 }
             })
-            .can_drop(|data, window, cx| {
+            .can_drop(|data, _window, _cx| {
                 if data.is::<ExternalPaths>() {
                     return true;
                 }
@@ -1002,48 +993,48 @@ impl Render for MainWindow {
             })
             .on_action::<actions::video::ToggleScaleFactor>(using!(
                 [],
-                move |action, window, cx| {
+                move |action, _window, cx| {
                     cx.global_mut::<GlobalState>().scale_factor = action.0;
                     cx.notify(self_entity_id);
                 }
             ))
-            .on_action::<actions::video::ToggleFullscreen>(|event, window, cx| {
+            .on_action::<actions::video::ToggleFullscreen>(|_event, window, _cx| {
                 window.toggle_fullscreen();
             })
-            .on_action::<actions::file::Exit>(|event, window, cx| {
+            .on_action::<actions::file::Exit>(|_event, window, _cx| {
                 window.remove_window();
             })
-            .on_action::<actions::playback::TogglePause>(|event, window, cx| {
+            .on_action::<actions::playback::TogglePause>(|_event, _window, _cx| {
                 PLAYING.fetch_not(Ordering::Relaxed);
             })
-            .on_action::<actions::video::ToggleFixedSize>(|event, window, cx| {
+            .on_action::<actions::video::ToggleFixedSize>(|_event, _window, cx| {
                 cx.global_mut::<GlobalState>().tap_deref_mut(|global| {
                     global.fixed_size = !global.fixed_size;
                 });
             })
-            .on_action::<actions::video::ToggleIntegerScaling>(|event, window, cx| {
+            .on_action::<actions::video::ToggleIntegerScaling>(|_event, _window, cx| {
                 cx.global_mut::<GlobalState>().tap_deref_mut(|global| {
                     global.integer_scaling = !global.integer_scaling;
                 });
             })
-            .on_action::<actions::video::ToggleLinearFiltering>(|event, window, cx| {
+            .on_action::<actions::video::ToggleLinearFiltering>(|_event, _window, cx| {
                 cx.global_mut::<GlobalState>().tap_deref_mut(|global| {
                     global.linear_filtering = !global.linear_filtering;
                 });
             })
-            .on_action::<actions::video::ToggleShowFps>(|event, window, cx| {
+            .on_action::<actions::video::ToggleShowFps>(|_event, _window, cx| {
                 cx.global_mut::<GlobalState>().tap_deref_mut(|global| {
                     global.show_fps = !global.show_fps;
                 });
             })
             .on_action::<actions::playback::StepFrame>(
-                cx.listener(move |this, event, window, cx| this.step_frame(1)),
+                cx.listener(move |this, _event, _window, _cx| this.step_frame(1)),
             )
             .on_action::<actions::playback::StepTick>(
-                cx.listener(|this, event, window, cx| this.step_tick(1)),
+                cx.listener(|this, _event, _window, _cx| this.step_tick(1)),
             )
             .on_action::<actions::playback::ToggleFastForward>(cx.listener(
-                |this, event, window, cx| {
+                |this, _event, _window, cx| {
                     cx.global_mut::<GlobalState>().tap_deref_mut(|global| {
                         global.fast_forward_on = !global.fast_forward_on;
                         this.audio_controller_sender
@@ -1052,24 +1043,26 @@ impl Render for MainWindow {
                     });
                 },
             ))
-            .on_action::<actions::tools::ToggleDebugger>(cx.listener(|this, event, window, cx| {
-                if let Some(window_handle) =
-                    cx.global_mut::<WindowMap>().remove(&WindowType::Debugger)
-                {
-                    window_handle
-                        .update(cx, |_, window, cx| window.remove_window())
-                        .unwrap();
-                } else {
-                    let window_handle = Debugger::open(window, cx).unwrap().into();
-                    cx.global_mut::<WindowMap>()
-                        .insert(WindowType::Debugger, window_handle);
-                }
-            }))
-            .on_action::<actions::tools::Settings>(cx.listener(|this, event, window, cx| {
+            .on_action::<actions::tools::ToggleDebugger>(cx.listener(
+                |_this, _event, window, cx| {
+                    if let Some(window_handle) =
+                        cx.global_mut::<WindowMap>().remove(&WindowType::Debugger)
+                    {
+                        window_handle
+                            .update(cx, |_, window, _cx| window.remove_window())
+                            .unwrap();
+                    } else {
+                        let window_handle = Debugger::open(window, cx).unwrap().into();
+                        cx.global_mut::<WindowMap>()
+                            .insert(WindowType::Debugger, window_handle);
+                    }
+                },
+            ))
+            .on_action::<actions::tools::Settings>(cx.listener(|_this, _event, window, cx| {
                 if let Some(window_handle) = cx.global_mut::<WindowMap>().get(&WindowType::Settings)
                 {
                     window_handle
-                        .update(cx, |_, window, cx| window.activate_window())
+                        .update(cx, |_, window, _cx| window.activate_window())
                         .unwrap();
                 } else {
                     let window_handle = SettingsWindow::open(window, cx).unwrap().into();

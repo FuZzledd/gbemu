@@ -90,7 +90,7 @@ impl RenderOnce for Button {
             disabled,
         } = self;
 
-        let state = window.use_keyed_state((id, "state"), cx, |window, cx| ButtonInner {
+        let state = window.use_keyed_state((id, "state"), cx, |_window, _cx| ButtonInner {
             hover_progress,
             hovered,
             anim_start_time,
@@ -108,7 +108,7 @@ impl RenderOnce for Button {
 
         drop(theme);
 
-        cx.update_entity(&state, |this, cx| {
+        cx.update_entity(&state, |this, _cx| {
             if this.hovered {
                 this.hover_progress = this
                     .anim_start_time
@@ -152,12 +152,12 @@ impl RenderOnce for Button {
                     .id(("button_inner", state.entity_id()))
                     .when(!disabled, |this| {
                         this.on_hover(move |&hovered, window, cx| {
-                            cx.update_entity(&state, |this, cx| {
+                            cx.update_entity(&state, |this, _cx| {
                                 this.hovered = hovered;
                                 this.hover_progress = if hovered { 0.0 } else { 1.0 };
                                 this.anim_start_time = Instant::now();
                             });
-                            window.on_next_frame(move |window, cx| cx.notify(current_view));
+                            window.on_next_frame(move |_window, cx| cx.notify(current_view));
                         })
                     }),
             )

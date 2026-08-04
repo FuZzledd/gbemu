@@ -1,5 +1,5 @@
 use crate::actions_with_attr;
-use gpui::{Action, actions};
+use gpui::Action;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

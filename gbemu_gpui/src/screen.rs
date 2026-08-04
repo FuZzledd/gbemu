@@ -4,7 +4,6 @@ use std::sync::Arc;
 use gpui::*;
 use tap::Tap;
 use uzi::using;
-use wgpu::Texture;
 
 use crate::{GlobalState, RenderState};
 
@@ -32,7 +31,7 @@ impl Styled for Screen {
 }
 
 impl RenderOnce for Screen {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         canvas(
             |_, _, _| {},
             using!(

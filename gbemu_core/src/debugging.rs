@@ -524,7 +524,7 @@ pub fn parse_add_breakpoint<'src>() -> impl Parser<'src, &'src str, Command, Err
                 .at_least(1)
                 .collect(),
         )
-        .map(|breakpoints| Command::AddBreakpoint(breakpoints))
+        .map(Command::AddBreakpoint)
 }
 
 pub fn parse_delete_breakpoints<'src>() -> impl Parser<'src, &'src str, Command, ErrorTy<'src>> {
@@ -536,7 +536,7 @@ pub fn parse_delete_breakpoints<'src>() -> impl Parser<'src, &'src str, Command,
                 .at_least(1)
                 .collect(),
         )
-        .map(|breakpoints| Command::DeleteBreakpoints(breakpoints))
+        .map(Command::DeleteBreakpoints)
 }
 
 pub fn parse_enable_breakpoints<'src>() -> impl Parser<'src, &'src str, Command, ErrorTy<'src>> {
@@ -548,7 +548,7 @@ pub fn parse_enable_breakpoints<'src>() -> impl Parser<'src, &'src str, Command,
                 .at_least(1)
                 .collect(),
         )
-        .map(|breakpoints| Command::EnableBreakpoints(breakpoints))
+        .map(Command::EnableBreakpoints)
 }
 
 pub fn parse_disable_breakpoints<'src>() -> impl Parser<'src, &'src str, Command, ErrorTy<'src>> {
@@ -560,7 +560,7 @@ pub fn parse_disable_breakpoints<'src>() -> impl Parser<'src, &'src str, Command
                 .at_least(1)
                 .collect(),
         )
-        .map(|breakpoints| Command::DisableBreakpoints(breakpoints))
+        .map(Command::DisableBreakpoints)
 }
 
 pub fn parse_list_breakpoints<'src>() -> impl Parser<'src, &'src str, Command, ErrorTy<'src>> {
@@ -773,15 +773,14 @@ impl Command {
                         Ok(_) => {
                             successful.push(id);
                         }
-                        Err(err) => match err {
-                            AccessBreakpointError::NonExistent(id) => {
+                        Err(err) => {
+                            if let AccessBreakpointError::NonExistent(id) = err {
                                 unsuccessful.push(text![
                                     styled(format!("Couldn't find breakpoint {id}"))
                                         .with_color(|palette| palette.red())
                                 ]);
                             }
-                            _ => {}
-                        },
+                        }
                     };
                 }
                 text_output.push(text![format!(
@@ -801,15 +800,14 @@ impl Command {
                         Ok(_) => {
                             successful.push(id);
                         }
-                        Err(err) => match err {
-                            AccessBreakpointError::NonExistent(id) => {
+                        Err(err) => {
+                            if let AccessBreakpointError::NonExistent(id) = err {
                                 unsuccessful.push(text![
                                     styled(format!("Couldn't find breakpoint {id}"))
                                         .with_color(|palette| palette.red())
                                 ]);
                             }
-                            _ => {}
-                        },
+                        }
                     };
                 }
                 text_output.push(text![format!(
@@ -829,15 +827,14 @@ impl Command {
                         Ok(_) => {
                             successful.push(id);
                         }
-                        Err(err) => match err {
-                            AccessBreakpointError::NonExistent(id) => {
+                        Err(err) => {
+                            if let AccessBreakpointError::NonExistent(id) = err {
                                 unsuccessful.push(text![
                                     styled(format!("Couldn't find breakpoint {id}"))
                                         .with_color(|palette| palette.red())
                                 ]);
                             }
-                            _ => {}
-                        },
+                        }
                     };
                 }
                 text_output.push(text![format!(
