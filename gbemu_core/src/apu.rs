@@ -26,7 +26,8 @@ const CLOCK_DIVISOR: f64 = 1.0;
 fn create_blip_bufs() -> [BlipBuf; 2] {
     array::from_fn(|_| {
         let mut buf = BlipBuf::new(48_000 / 10);
-        buf.set_rates(4.194304E+6 / CLOCK_DIVISOR, 48_000.0);
+        buf.set_rates(4.194304E+6 / CLOCK_DIVISOR, 48_000.0)
+            .unwrap();
         buf
     })
 }
@@ -45,11 +46,11 @@ impl APUSupport {
                 if let Ok(buffer) = self.input_receiver.recv() {
                     for (clocks, frame) in buffer {
                         for (buf, delta) in izip!(self.blip_bufs.iter_mut(), frame) {
-                            buf.add_delta(clocks / CLOCK_DIVISOR as u32, delta);
+                            buf.add_delta(clocks / CLOCK_DIVISOR as u32, delta).unwrap();
                         }
                     }
                     for buf in self.blip_bufs.iter_mut() {
-                        buf.end_frame(buf.clocks_needed(512));
+                        buf.end_frame(buf.clocks_needed(512).unwrap()).unwrap();
                     }
                     let (mut buf_l, mut buf_r) = ([0; 512], [0; 512]);
                     while self.blip_bufs[0].samples_avail() > 0 {
@@ -98,7 +99,7 @@ impl APU {
             input_receiver: self.buffer_channel.1.clone(),
             blip_bufs: create_blip_bufs(),
         };
-        self.clocks_needed = support.blip_bufs[0].clocks_needed(512);
+        self.clocks_needed = support.blip_bufs[0].clocks_needed(512).unwrap();
         support
     }
 

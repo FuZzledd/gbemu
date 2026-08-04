@@ -1,4 +1,5 @@
 use core::time::Duration;
+use std::rc::Rc;
 
 use convert_case::Casing;
 use gpui::{prelude::*, *};
@@ -6,23 +7,39 @@ use itertools::Itertools;
 use tap::Tap;
 use uzi::using;
 
+use crate::ext::ElementBoundsExt;
+
 use crate::{components::button::Button, theme::ThemeRegistry};
 
 pub struct MenuBar {
     bounds: Bounds<Pixels>,
+    style: StyleRefinement,
+    hover: Option<Rc<dyn Fn(StyleRefinement) -> StyleRefinement + 'static>>,
 }
 
 impl MenuBar {
     pub fn new() -> Self {
         Self {
             bounds: Default::default(),
+            style: StyleRefinement::default(),
+            hover: None,
         }
+    }
+
+    pub fn hover(&mut self, func: impl Fn(StyleRefinement) -> StyleRefinement + 'static) {
+        self.hover = Some(Rc::new(func));
     }
 }
 
 impl Default for MenuBar {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Styled for MenuBar {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
     }
 }
 
@@ -75,74 +92,87 @@ impl Render for MenuBar {
             MenuBarButton::new(id, menu, current_popup.clone())
         });
 
-        cx.subscribe_self(using!(
-            [current_popup],
-            move |_this, _: &DismissEvent, cx| {
-                current_popup.write(cx, None);
-            }
-        ))
-        .detach();
+        let _dismiss_subscriber = window.use_keyed_state(
+            (element_id.clone(), "dismiss_subscriber"),
+            cx,
+            |window, cx| {
+                cx.subscribe(
+                    &entity,
+                    using!([current_popup], move |_this, _, _: &DismissEvent, cx| {
+                        current_popup.write(cx, None);
+                    }),
+                )
+            },
+        );
 
         let viewport_size = window.viewport_size();
 
-        div()
-            .on_mouse_down_out(using!([menu_bounds, entity], move |event, _window, cx| {
-                let mouse_pos = event.position;
+        deferred(
+            div()
+                .on_mouse_down_out(using!([menu_bounds, entity], move |event, _window, cx| {
+                    let mouse_pos = event.position;
 
-                if menu_bounds
-                    .read(cx)
-                    .iter()
-                    .all(|bounds| !bounds.contains(&mouse_pos))
-                {
-                    entity.update(cx, |_this, cx| {
-                        cx.emit(DismissEvent);
-                    })
-                }
-            }))
-            .relative()
-            .bg(background)
-            .pl_1()
-            .pr_1()
-            .shadow_sm()
-            .border_b_1()
-            .border_color(border)
-            .text_color(foreground)
-            .w_full()
-            .flex()
-            .justify_start()
-            .items_center()
-            .gap_0p5()
-            .children(menus)
-            .when_some(
-                current_popup.read(cx).clone(),
-                using!(
-                    [element_id, current_popup, menu_bounds],
-                    move |this, (bounds, menu)| {
-                        this.child(deferred(
-                            anchored()
-                                .position_mode(AnchoredPositionMode::Window)
-                                .snap_to_window_with_margin(px(16.0))
-                                .anchor(Anchor::TopLeft)
-                                .position(bounds.bottom_left())
-                                .child(
-                                    MenuPopup::new(
-                                        (element_id, menu.name.clone().as_ref()),
-                                        menu,
-                                        current_popup,
-                                        menu_bounds,
-                                    )
-                                    .max_w(viewport_size.width * 0.8),
-                                ),
-                        ))
+                    if menu_bounds
+                        .read(cx)
+                        .iter()
+                        .all(|bounds| !bounds.contains(&mouse_pos))
+                    {
+                        entity.update(cx, |_this, cx| {
+                            cx.emit(DismissEvent);
+                        })
                     }
-                ),
-            )
-            .on_bounds_prepaint(using!([entity, menu_bounds], move |bounds, _, cx| {
-                entity.update(cx, |this, cx| {
-                    this.bounds = bounds;
-                    menu_bounds.as_mut(cx).clear();
-                })
-            }))
+                }))
+                .relative()
+                .flex_shrink_0()
+                .bg(background)
+                .pl_1()
+                .pr_1()
+                .shadow_sm()
+                .border_b_1()
+                .border_color(border)
+                .text_color(foreground)
+                .w_full()
+                .flex()
+                .justify_start()
+                .items_center()
+                .gap_0p5()
+                .overflow_hidden()
+                .children(menus)
+                .when_some(
+                    current_popup.read(cx).clone(),
+                    using!(
+                        [element_id, current_popup, menu_bounds],
+                        move |this, (bounds, menu)| {
+                            this.child(deferred(
+                                anchored()
+                                    .position_mode(AnchoredPositionMode::Window)
+                                    .snap_to_window_with_margin(px(16.0))
+                                    .anchor(Anchor::TopLeft)
+                                    .position(bounds.bottom_left())
+                                    .child(
+                                        MenuPopup::new(
+                                            (element_id, menu.name.clone().as_ref()),
+                                            menu,
+                                            current_popup,
+                                            menu_bounds,
+                                        )
+                                        .max_w(viewport_size.width * 0.8),
+                                    ),
+                            ))
+                        }
+                    ),
+                )
+                .on_bounds_prepaint(using!([entity, menu_bounds], move |bounds, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.bounds = *bounds;
+                        menu_bounds.as_mut(cx).clear();
+                    })
+                }))
+                .tap_mut(|this: &mut Div| this.style().refine(&self.style))
+                .when_some(self.hover.clone(), |this, hover| {
+                    this.hover(|style| hover(style))
+                }),
+        )
     }
 }
 
@@ -242,47 +272,11 @@ impl RenderOnce for MenuBarButton {
             )
             .on_bounds_paint(using!([bounds], move |canvas_bounds, _, cx| {
                 bounds.update(cx, move |this, _cx| {
-                    *this = canvas_bounds;
+                    *this = *canvas_bounds;
                 })
             }))
     }
 }
-
-pub trait ElementExt: ParentElement
-where
-    Self: Sized,
-{
-    fn on_bounds_prepaint(
-        self,
-        listener: impl FnOnce(Bounds<Pixels>, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.child(
-            canvas(listener, |_, _, _, _| {})
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full(),
-        )
-    }
-
-    fn on_bounds_paint(
-        self,
-        listener: impl FnOnce(Bounds<Pixels>, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.child(
-            canvas(
-                |_, _, _| {},
-                |bounds, _, window, cx| listener(bounds, window, cx),
-            )
-            .top_0()
-            .left_0()
-            .absolute()
-            .size_full(),
-        )
-    }
-}
-
-impl<T: ParentElement> ElementExt for T {}
 
 #[derive(IntoElement)]
 struct MenuPopup {
@@ -378,7 +372,7 @@ impl RenderOnce for MenuPopup {
                 })
             }))
             .on_bounds_paint(using!([self.menu_bounds], move |bounds, _window, cx| {
-                menu_bounds.as_mut(cx).push(bounds);
+                menu_bounds.as_mut(cx).push(*bounds);
             }))
             .when_some(
                 current_menu.read(cx).clone(),
@@ -476,8 +470,8 @@ impl RenderOnce for PopupMenuItem {
                 .h_0()
                 .border(px(1.0))
                 .border_color(border)
-                .flex_grow()
-                .flex_shrink()
+                .flex_grow_1()
+                .flex_shrink_1()
                 .into_any_element(),
             OwnedMenuItem::Submenu(owned_menu) => {
                 let OwnedMenu {
@@ -507,8 +501,8 @@ impl RenderOnce for PopupMenuItem {
                         };
                     }
                 ))
-                .flex_grow()
-                .flex_shrink()
+                .flex_grow_1()
+                .flex_shrink_1()
                 .flex()
                 .items_center()
                 .justify_between()
@@ -523,14 +517,14 @@ impl RenderOnce for PopupMenuItem {
                         .text_color(foreground),
                 )
                 .on_bounds_prepaint(using!([button_bounds], move |bounds, _window, cx| {
-                    button_bounds.write(cx, bounds);
+                    button_bounds.write(cx, *bounds);
                 }))
                 .into_any_element()
             }
             OwnedMenuItem::SystemMenu(owned_os_menu) => div()
                 .child(owned_os_menu.name)
-                .flex_grow()
-                .flex_shrink()
+                .flex_grow_1()
+                .flex_shrink_1()
                 .into_any_element(),
             OwnedMenuItem::Action {
                 name,
@@ -577,8 +571,8 @@ impl RenderOnce for PopupMenuItem {
                         )
                     },
                 )
-                .flex_grow()
-                .flex_shrink()
+                .flex_grow_1()
+                .flex_shrink_1()
                 .flex()
                 .justify_between()
                 .items_baseline()

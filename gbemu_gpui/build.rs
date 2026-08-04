@@ -1,5 +1,5 @@
 use core::error::Error;
-use std::{collections::HashMap, fs};
+use std::{collections::BTreeMap, fs};
 
 use databake::*;
 use gbemu_common::theme::*;
@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .filter_map(|path| path.ok())
         .map(|file| yaml_serde::from_str::<Theme>(&fs::read_to_string(file).unwrap()).unwrap())
         .map(|theme| (theme.name.clone(), theme))
-        .collect::<HashMap<_, _>>();
+        .collect::<BTreeMap<_, _>>();
 
     fs::write(
         format!("{}/themes_generated", std::env::var("OUT_DIR")?),

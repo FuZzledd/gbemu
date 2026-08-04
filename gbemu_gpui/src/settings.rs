@@ -1,17 +1,27 @@
-use crate::components::{button::Button, root::CloseRequestEvent, scrollbar::Scrollbar};
-use crate::theme::ThemeRegistry;
+use crate::components::{Checkbox, Separator, radio::RadioButton, root::Root};
 use crate::{APP, WindowMap, WindowType};
 use crate::{EtceteraStrategy, components::titlebar::TitleBar};
-use crate::{components::root::Root, reload_keys};
+use crate::{
+    actions,
+    components::{
+        button::Button,
+        dropdown::Dropdown,
+        root::CloseRequestEvent,
+        scrollbar::{ListScrollbar, Scrollbar},
+    },
+};
+use crate::{reload_settings, theme::ThemeRegistry};
 use better_default::Default;
 use convert_case::Casing;
+use derive_more::Display;
 use etcetera::AppStrategy;
-use gbemu_common::theme::Color;
+use gbemu_common::theme::{Color, Theme};
+use gbemu_core::Palette;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_elements::editable_text::{EditableTextState, StringStorage, text_input};
+use gpui_elements::editable_text::{EditableTextState, StringStorage, TextChanged, text_input};
 use itertools::Itertools;
-use palette::Srgba;
+use palette::{Srgba, rgb::Rgba};
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -23,6 +33,7 @@ use std::{
 };
 use std::{collections::HashMap, fs};
 use std::{fmt::Debug, path::PathBuf};
+use strum::{EnumDiscriminants, EnumIter, EnumProperty, IntoDiscriminant, IntoEnumIterator};
 use tap::{Conv, Tap};
 use uzi::using;
 
@@ -34,17 +45,83 @@ macro_rules! binds {
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
 pub struct Settings {
-    #[serde(default)]
+    pub(crate) video: VideoSettings,
     pub(crate) input: InputSettings,
-    #[serde(default)]
     pub(crate) emulator: EmulatorSettings,
 }
 impl Global for Settings {}
 
+#[derive(
+    Default,
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Debug,
+    EnumIter,
+    EnumProperty,
+    EnumDiscriminants,
+)]
+pub enum PaletteOptions {
+    #[default]
+    #[strum(props(Display = "Grayscale"))]
+    Grayscale,
+    #[strum(props(Display = "DMG"))]
+    Dmg,
+    #[strum(props(Display = "Game Boy Pocket"))]
+    Pocket,
+    #[strum(props(Display = "Game Boy Light"))]
+    Light,
+    #[strum(props(Display = "Custom"))]
+    Custom(Palette),
+}
+
+impl From<PaletteOptions> for Palette {
+    fn from(value: PaletteOptions) -> Self {
+        match value {
+            PaletteOptions::Grayscale => Palette::default(),
+            PaletteOptions::Dmg => {
+                Palette::from([[117, 152, 51], [88, 143, 81], [59, 117, 96], [46, 97, 90]])
+            }
+            PaletteOptions::Pocket => Palette::from([
+                [173, 191, 146],
+                [150, 166, 124],
+                [114, 126, 100],
+                [90, 99, 92],
+            ]),
+            PaletteOptions::Light => {
+                Palette::from([[0, 181, 129], [0, 154, 113], [0, 105, 74], [0, 79, 59]])
+            }
+            PaletteOptions::Custom(palette) => palette,
+        }
+    }
+}
+
 #[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
+
+pub struct VideoSettings {
+    pub color_palette: PaletteOptions,
+    pub custom_palette: Palette,
+    #[default(true)]
+    pub integer_scaling: bool,
+    #[default(true)]
+    pub fit_window: bool,
+    #[default(3)]
+    pub scale: u32,
+    #[default(false)]
+    pub filtering: bool,
+    #[default(false)]
+    pub show_fps: bool,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
 pub struct InputSettings {
-    #[serde(default)]
     pub(crate) keybinds: Keymap,
 }
 
@@ -68,12 +145,13 @@ impl InputSettings {
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
 pub struct EmulatorSettings {
-    #[serde(default)]
     #[default("Catppuccin Frappe".into())]
-    pub(crate) theme: Cow<'static, str>,
-    #[serde(default)]
-    pub(crate) library_path: PathBuf,
+    pub theme: Cow<'static, str>,
+    pub library_path: PathBuf,
+    pub bootrom_path: PathBuf,
+    pub use_bootrom: bool,
 }
 
 pub trait SerializableAction: Action {
@@ -261,7 +339,9 @@ impl Serialize for Keymap {
 pub struct SettingsWindow {
     pub settings: Entity<Settings>,
     pub input: AnyView,
-    emulator: AnyView,
+    pub emulator: AnyView,
+    pub video: AnyView,
+    focus: FocusHandle,
 }
 
 impl SettingsWindow {
@@ -278,6 +358,7 @@ impl SettingsWindow {
                     ..Default::default()
                 }),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_min_size: Some(size(px(800.0), px(400.0))),
                 ..Default::default()
             },
             Self::create_root,
@@ -322,11 +403,14 @@ impl SettingsWindow {
 
         let input = AnyView::from(InputSettingsTab::new(settings.clone(), cx));
         let emulator = AnyView::from(EmulatorSettingsTab::new(settings.clone(), cx));
+        let video = AnyView::from(VideoSettingsTab::new(settings.clone(), cx));
 
-        let entity = cx.new(|_cx| Self {
+        let entity = cx.new(|cx| Self {
             settings,
             input,
             emulator,
+            video,
+            focus: cx.focus_handle(),
         });
 
         cx.observe_release(&entity, |_this, cx| {
@@ -364,15 +448,21 @@ impl Render for SettingsWindow {
         let unsaved_changes =
             window.use_keyed_state((element_id.clone(), "unsaved_changes"), cx, |_, _| false);
 
-        cx.observe(
-            &self.settings,
-            using!([unsaved_changes], move |_this, settings, cx| {
-                unsaved_changes.write(cx, settings.read(cx) != cx.global::<Settings>());
-            }),
-        )
-        .detach();
+        let _settings_observer = window.use_keyed_state(
+            (element_id.clone(), "settings_observer"),
+            cx,
+            |window, cx| {
+                cx.observe(
+                    &self.settings,
+                    using!([unsaved_changes], move |_this, settings, cx| {
+                        unsaved_changes.write(cx, settings.read(cx) != cx.global::<Settings>());
+                    }),
+                )
+            },
+        );
 
         div()
+            .track_focus(&self.focus)
             .size_full()
             .flex()
             .flex_col()
@@ -395,10 +485,7 @@ impl Render for SettingsWindow {
                 (element_id.clone(), "Tab bar"),
                 [
                     Tab::new("Game", div().size_full().bg(background).child("Game stuff")),
-                    Tab::new(
-                        "Video",
-                        div().size_full().bg(background).child("Video stuff"),
-                    ),
+                    Tab::new("Video", self.video.clone()),
                     Tab::new("Keyboard", self.input.clone()),
                     Tab::new("Emulator", self.emulator.clone()),
                 ],
@@ -453,7 +540,9 @@ impl Render for SettingsWindow {
                                                 )
                                                 .unwrap();
                                                 cx.set_global(settings);
-                                                reload_keys(cx);
+
+                                                reload_settings(cx);
+
                                                 unsaved_changes.write(cx, false);
                                             }
                                         },
@@ -463,30 +552,389 @@ impl Render for SettingsWindow {
                             ),
                     ),
             )
+            .on_action::<actions::dev::ToggleInspector>(|_, window, cx| {
+                #[cfg(debug_assertions)]
+                window.toggle_inspector(cx);
+            })
+    }
+}
+
+pub struct VideoSettingsTab {
+    settings: Entity<Settings>,
+    palette_dropdown: Entity<Dropdown<PaletteOptions>>,
+}
+
+impl VideoSettingsTab {
+    pub fn new(settings: Entity<Settings>, cx: &mut App) -> Entity<Self> {
+        let custom_palette = settings.read(cx).video.custom_palette;
+
+        let options = PaletteOptions::iter().map(|option| {
+            (
+                Cow::from(option.get_str("Display").unwrap()),
+                match option {
+                    PaletteOptions::Custom(_) => PaletteOptions::Custom(custom_palette),
+                    other => other,
+                },
+            )
+        });
+
+        let elem = cx.new(|cx| {
+            let elem = Self {
+                palette_dropdown: cx.new(|cx| {
+                    Dropdown::new_raw(options, cx).tap_mut(|this| {
+                        this.selected_idx = this
+                            .options
+                            .iter()
+                            .find_position(|item| {
+                                item.1.discriminant()
+                                    == settings.read(cx).video.color_palette.discriminant()
+                            })
+                            .map(|(idx, _)| idx)
+                            .unwrap_or(0);
+                    })
+                }),
+                settings,
+            };
+
+            cx.observe(
+                &elem.palette_dropdown,
+                |this: &mut VideoSettingsTab, entity, cx| {
+                    this.settings.update(cx, |settings, cx| {
+                        settings.video.color_palette = entity.read(cx).get_selected().1;
+                        cx.notify();
+                    });
+                },
+            )
+            .detach();
+
+            elem
+        });
+
+        elem
+    }
+}
+
+impl Render for VideoSettingsTab {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let element_id = ElementId::from(("VideoSettings", cx.entity_id()));
+
+        let theme = cx.global::<ThemeRegistry>().current_theme();
+
+        let foreground = theme.palette.foreground();
+        let background = theme.palette.background();
+        let border = theme.palette.gray();
+
+        drop(theme);
+
+        let settings = &self.settings.read(cx).video.clone();
+
+        div()
+            .bg(background)
+            .text_color(foreground)
+            .mt_2()
+            .p_5()
+            .flex()
+            .flex_col()
+            .items_stretch()
+            .child(
+                div()
+                    .flex()
+                    .items_baseline()
+                    .child("Game Boy Colour Palette")
+                    .child(
+                        div()
+                            .ml_2()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .items_stretch()
+                            .child(self.palette_dropdown.clone())
+                            .child(div().flex().gap_2().children({
+                                let palette = self.palette_dropdown.read(cx).get_selected().1;
+
+                                let palette_colors: [Color; 4] = Palette::from(palette).into();
+                                palette_colors.into_iter().enumerate().map(using!(
+                                    [&cx, element_id],
+                                    move |(idx, color)| {
+                                        Button::new(
+                                            Duration::from_millis(100),
+                                            (element_id.clone(), format!("palette button {idx}")),
+                                        )
+                                        .on_click(cx.listener(move |this, event, window, cx| {
+                                            let (r, g, b, _) = Srgba::from(color)
+                                                .into_format::<_, u8>()
+                                                .into_components();
+                                            let color = light_file_dialog::color_chooser(
+                                                Some("Pick a color"),
+                                                None,
+                                                Some(light_file_dialog::types::RgbColor {
+                                                    r,
+                                                    g,
+                                                    b,
+                                                }),
+                                            );
+
+                                            if let Some((
+                                                _,
+                                                light_file_dialog::RgbColor { r, g, b },
+                                            )) = color
+                                            {
+                                                this.settings.update(cx, |settings, cx| {
+                                                    settings.video.custom_palette[idx].r = r;
+                                                    settings.video.custom_palette[idx].g = g;
+                                                    settings.video.custom_palette[idx].b = b;
+                                                    settings.video.custom_palette[idx].a = 0xFF;
+
+                                                    cx.notify();
+                                                });
+                                                this.palette_dropdown.update(cx, |dropdown, cx| {
+                                                    dropdown.options = PaletteOptions::iter()
+                                                        .map(|option| {
+                                                            (
+                                                                Cow::from(
+                                                                    option
+                                                                        .get_str("Display")
+                                                                        .unwrap(),
+                                                                ),
+                                                                match option {
+                                                                    PaletteOptions::Custom(_) => {
+                                                                        PaletteOptions::Custom(
+                                                                            this.settings
+                                                                                .read(cx)
+                                                                                .video
+                                                                                .custom_palette,
+                                                                        )
+                                                                    }
+                                                                    other => other,
+                                                                },
+                                                            )
+                                                        })
+                                                        .collect();
+                                                });
+                                                cx.notify();
+                                            }
+                                        }))
+                                        .when(
+                                            !matches!(palette, PaletteOptions::Custom(_)),
+                                            |this| this.disabled(),
+                                        )
+                                        .flex_1()
+                                        .flex_basis(relative(1.0))
+                                        .p_1()
+                                        .border_color(border)
+                                        .border_1()
+                                        .rounded_md()
+                                        .child(div().rounded_md().w_full().h_8().bg(color))
+                                    }
+                                ))
+                            })),
+                    ),
+            )
+            .child(Separator::new())
+            .child(div().flex().justify_center().child("Default Video Options"))
+            .child(
+                div()
+                    .flex()
+                    .flex_auto()
+                    .mt_2()
+                    .justify_center()
+                    .gap_4()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .flex_shrink_0()
+                            .gap_2()
+                            .items_center()
+                            .justify_center()
+                            .child("Bilinear Filtering")
+                            .child(
+                                Checkbox::new(
+                                    settings.filtering,
+                                    (element_id.clone(), "filtering"),
+                                )
+                                .on_checked(cx.listener(using!(
+                                    [self.settings],
+                                    move |this, &checked, window, cx| {
+                                        settings.update(cx, |settings, cx| {
+                                            settings.video.filtering = checked;
+                                            cx.notify();
+                                        });
+                                        cx.notify();
+                                    }
+                                ))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .flex_shrink_0()
+                            .gap_2()
+                            .items_center()
+                            .justify_center()
+                            .child("Resize to Fit Window")
+                            .child(
+                                Checkbox::new(
+                                    settings.fit_window,
+                                    (element_id.clone(), "fit_window"),
+                                )
+                                .on_checked(cx.listener(using!(
+                                    [self.settings],
+                                    move |this, &checked, window, cx| {
+                                        settings.update(cx, |settings, cx| {
+                                            settings.video.fit_window = checked;
+                                            cx.notify();
+                                        });
+                                        cx.notify();
+                                    }
+                                ))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .flex_shrink_0()
+                            .gap_2()
+                            .items_center()
+                            .justify_center()
+                            .child("Force Integer Scaling")
+                            .child(
+                                Checkbox::new(
+                                    settings.integer_scaling,
+                                    (element_id.clone(), "integer_scaling"),
+                                )
+                                .on_checked(cx.listener(using!(
+                                    [self.settings],
+                                    move |this, &checked, window, cx| {
+                                        settings.update(cx, |settings, cx| {
+                                            settings.video.integer_scaling = checked;
+                                            cx.notify();
+                                        });
+                                        cx.notify();
+                                    }
+                                ))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .flex_shrink_0()
+                            .gap_2()
+                            .items_center()
+                            .justify_center()
+                            .child("Show FPS")
+                            .child(
+                                Checkbox::new(settings.show_fps, (element_id.clone(), "show_fps"))
+                                    .on_checked(cx.listener(using!(
+                                        [self.settings],
+                                        move |this, &checked, window, cx| {
+                                            settings.update(cx, |settings, cx| {
+                                                settings.video.show_fps = checked;
+                                                cx.notify();
+                                            });
+                                            cx.notify();
+                                        }
+                                    ))),
+                            ),
+                    ),
+            )
+            .child(div().flex().mt_1().gap_2().child("Fixed Scale"))
+            .child(div().flex().children((1..9).map(|scale| {
+                div()
+                    .flex()
+                    .flex_1()
+                    .flex_shrink_0()
+                    .gap_2()
+                    .items_center()
+                    .justify_center()
+                    .child(format!("{scale}x"))
+                    .child(
+                        RadioButton::new(
+                            settings.scale == scale,
+                            (element_id.clone(), format!("scale-{scale}x")),
+                        )
+                        .on_checked(cx.listener(using!(
+                            [self.settings],
+                            move |this, &_checked, window, cx| {
+                                settings.update(cx, |settings, cx| {
+                                    settings.video.scale = scale;
+                                    cx.notify();
+                                });
+                                cx.notify();
+                            }
+                        ))),
+                    )
+            })))
     }
 }
 
 pub struct EmulatorSettingsTab {
     settings: Entity<Settings>,
     library_path_state: Entity<EditableTextState>,
+    theme_dropdown: Entity<Dropdown<Theme>>,
 }
 
 impl EmulatorSettingsTab {
     pub fn new(settings: Entity<Settings>, cx: &mut App) -> Entity<Self> {
-        cx.new(|cx| Self {
-            library_path_state: cx.new(|cx| {
-                EditableTextState::new(
-                    StringStorage::from(settings.read(cx).emulator.library_path.to_string_lossy()),
-                    cx,
-                )
-            }),
-            settings,
-        })
+        let options = cx.global::<ThemeRegistry>().themes().clone();
+
+        let elem = cx.new(|cx| {
+            let elem = Self {
+                library_path_state: cx.new(|cx| {
+                    EditableTextState::new(
+                        StringStorage::from(
+                            settings.read(cx).emulator.library_path.to_string_lossy(),
+                        ),
+                        cx,
+                    )
+                }),
+                theme_dropdown: cx.new(|cx| {
+                    Dropdown::new_raw(options, cx).tap_mut(|this| {
+                        this.selected_idx = this
+                            .options
+                            .iter()
+                            .find_position(|item| item.0 == settings.read(cx).emulator.theme)
+                            .unwrap()
+                            .0;
+                    })
+                }),
+                settings,
+            };
+
+            cx.subscribe(
+                &elem.library_path_state,
+                |this: &mut EmulatorSettingsTab, state, _: &TextChanged, cx| {
+                    this.settings.update(cx, |settings, cx| {
+                        settings.emulator.library_path = state.read(cx).as_str().into();
+                    })
+                },
+            )
+            .detach();
+
+            cx.observe(
+                &elem.theme_dropdown,
+                |this: &mut EmulatorSettingsTab, entity, cx| {
+                    this.settings.update(cx, |settings, cx| {
+                        settings.emulator.theme = entity.read(cx).get_selected().0.clone();
+                        cx.notify();
+                    })
+                },
+            )
+            .detach();
+
+            elem
+        });
+
+        elem
     }
 }
 
 impl Render for EmulatorSettingsTab {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity_id = cx.entity_id();
         let element_id = ElementId::from(("emulator_settings", entity_id));
 
@@ -504,6 +952,7 @@ impl Render for EmulatorSettingsTab {
             .p_8()
             .flex()
             .flex_col()
+            .gap_2()
             .items_stretch()
             .child(
                 div()
@@ -535,41 +984,40 @@ impl Render for EmulatorSettingsTab {
                         .border_1()
                         .border_l_0()
                         .border_color(border)
-                        .child("Browse"),
+                        .child("Browse")
+                        .on_click(cx.listener(
+                            |this, event: &ClickEvent, window, cx| {
+                                if event.standard_click() {
+                                    let result = rfd::FileDialog::new()
+                                        .set_can_create_directories(true)
+                                        .set_directory(this.library_path_state.read(cx).as_str())
+                                        .set_parent(window)
+                                        .set_title("Pick a ROM Library folder")
+                                        .pick_folder();
+
+                                    if let Some(result) = result {
+                                        this.library_path_state.update(cx, |path, cx| {
+                                            path.emplace(&result.to_string_lossy(), cx)
+                                        });
+                                        this.settings.update(cx, |this, cx| {
+                                            this.emulator.library_path = result;
+                                        })
+                                    }
+                                }
+                            },
+                        )),
                     ),
             )
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .child("ROM Library Path")
-                    .child(
-                        text_input((element_id.clone(), "rom library text input"))
-                            .ml_2()
-                            .flex()
-                            .flex_1()
-                            .state(self.library_path_state.downgrade())
-                            .px_1()
-                            .py(rems(0.15))
-                            .rounded_l_md()
-                            .border_1()
-                            .border_color(border)
-                            .items_baseline()
-                            .bg(darker_background),
-                    )
-                    .child(
-                        Button::new(
-                            Duration::from_millis(200),
-                            (element_id.clone(), "rom library browse"),
-                        )
-                        .px_2()
-                        .py(rems(0.1))
-                        .rounded_r_md()
-                        .border_1()
-                        .border_l_0()
-                        .border_color(border)
-                        .child("Browse"),
-                    ),
+                div().flex().items_center().child("Theme").child(
+                    div()
+                        .ml_2()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .items_stretch()
+                        .child(self.theme_dropdown.clone()),
+                ),
             )
     }
 }
@@ -656,7 +1104,7 @@ impl Render for InputSettingsTab {
             .child(
                 list(
                     self.list_state.clone(),
-                    using!([self.bind_sections], move |idx, _window, _cx| {
+                    using!([self.bind_sections], move |idx, _window, cx| {
                         div()
                             .w_full()
                             .text_color(foreground)
@@ -678,11 +1126,10 @@ impl Render for InputSettingsTab {
                 .items_stretch()
                 .size_full(),
             )
-            .child(Scrollbar {
-                id: ElementId::from(("scrollbar", cx.entity_id())),
-                offset: self.list_state.scroll_px_offset_for_scrollbar().y,
-                max_offset: self.list_state.max_offset_for_scrollbar().y,
-            })
+            .child(ListScrollbar::new(
+                ("scrollbar", cx.entity_id()),
+                self.list_state.clone(),
+            ))
     }
 }
 
@@ -690,6 +1137,7 @@ pub struct InputSection {
     section_name: &'static str,
     binds: Vec<(&'static str, SerializedAction)>,
     settings: Entity<Settings>,
+    resolved_style: Entity<Option<StyleRefinement>>,
 }
 impl InputSection {
     fn new<T: AppContext>(
@@ -698,10 +1146,11 @@ impl InputSection {
         settings: Entity<Settings>,
         cx: &mut T,
     ) -> Entity<Self> {
-        cx.new(|_| Self {
+        cx.new(|cx| Self {
             section_name,
             settings,
             binds,
+            resolved_style: cx.new(|cx| None),
         })
     }
 }
@@ -723,7 +1172,7 @@ impl Render for InputSection {
 
         let settings = self.settings.clone();
 
-        div()
+        let mut elem = div()
             .flex()
             .items_stretch()
             .flex_col()
@@ -779,7 +1228,10 @@ impl Render for InputSection {
                                 .child(div().flex().flex_1()),
                         )
                     }),
-            )
+            );
+
+        self.resolved_style.write(cx, Some(elem.style().clone()));
+        elem
     }
 }
 
@@ -799,8 +1251,12 @@ fn render_bind(
     drop(theme);
 
     let name = bind.0;
+
+    let mut resolved_style = None;
     let bindable = window.use_keyed_state((element_id, name), cx, |_window, cx| {
-        BindableButton::new(bind.1.clone(), settings, cx)
+        let elem = BindableButton::new(bind.1.clone(), settings, cx);
+        resolved_style = Some(elem.resolved_style.clone());
+        elem
     });
 
     div()
@@ -813,7 +1269,7 @@ fn render_bind(
             div()
                 .flex()
                 .justify_center()
-                .items_baseline()
+                .items_center()
                 .child(bind.0)
                 .flex_1(),
         )
@@ -826,6 +1282,7 @@ pub struct BindableButton {
     is_binding: bool,
     binding_timer: Option<Task<()>>,
     focus_handle: FocusHandle,
+    resolved_style: Entity<StyleRefinement>,
 }
 
 impl BindableButton {
@@ -840,6 +1297,7 @@ impl BindableButton {
             is_binding: false,
             binding_timer: None,
             focus_handle: cx.focus_handle(),
+            resolved_style: cx.new(|cx| StyleRefinement::default()),
         }
     }
 }
@@ -856,6 +1314,39 @@ impl Render for BindableButton {
         let _lighter_background = theme.palette.lighter_background();
 
         drop(theme);
+
+        fn refresh_button_text(
+            button_text: Entity<String>,
+            cx: &mut App,
+            this: &mut BindableButton,
+        ) {
+            button_text.write(
+                cx,
+                this.settings
+                    .read(cx)
+                    .input
+                    .keybinds
+                    .bindings
+                    .get(&this.serialized_action.json_value())
+                    .map(|keybinds| {
+                        keybinds
+                            .iter()
+                            .map(|(keystrokes, _)| {
+                                keystrokes
+                                    .split_whitespace()
+                                    .map(|keystroke| {
+                                        Keystroke::parse(keystroke)
+                                            .unwrap()
+                                            .to_string()
+                                            .to_case(convert_case::Case::Train)
+                                    })
+                                    .join(" ")
+                            })
+                            .join(" | ")
+                    })
+                    .unwrap_or("None".into()),
+            );
+        }
 
         let button_text =
             window.use_keyed_state((element_id.clone(), "button_text"), cx, |_window, cx| {
@@ -910,7 +1401,7 @@ impl Render for BindableButton {
             .justify_center()
             .items_baseline()
             .on_click(cx.listener(using!(
-                [self.focus_handle],
+                [self.focus_handle, button_text],
                 move |this, event: &ClickEvent, window, cx| {
                     if event.standard_click() {
                         window.focus(&focus_handle, cx);
@@ -926,25 +1417,52 @@ impl Render for BindableButton {
                     }
                 }
             )))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-                if this.is_binding {
-                    this.settings.update(cx, |settings, cx| {
-                        settings.input.keybinds.insert(
-                            this.serialized_action.json_value(),
-                            vec![(event.keystroke.unparse(), this.serialized_action.action())],
-                        );
+            .on_aux_click(cx.listener(using!(
+                [self.focus_handle, button_text],
+                move |this, event: &ClickEvent, window, cx| {
+                    if event.is_right_click() {
+                        this.is_binding = false;
+                        this.binding_timer = None;
+                        this.settings.update(cx, |settings, cx| {
+                            settings
+                                .input
+                                .keybinds
+                                .remove(&this.serialized_action.json_value());
+                            cx.notify();
+                        });
+
+                        refresh_button_text(button_text.clone(), cx, this);
+
                         cx.notify();
-                    });
-                    this.binding_timer = None;
-                    this.is_binding = false;
-                    cx.notify();
+                    }
                 }
-            }))
+            )))
+            .on_key_down(cx.listener(using!(
+                [button_text],
+                move |this, event: &KeyDownEvent, _window, cx| {
+                    if this.is_binding {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.input.keybinds.insert(
+                                this.serialized_action.json_value(),
+                                vec![(event.keystroke.unparse(), this.serialized_action.action())],
+                            );
+                            cx.notify();
+                        });
+                        this.binding_timer = None;
+                        this.is_binding = false;
+
+                        refresh_button_text(button_text.clone(), cx, this);
+
+                        cx.notify();
+                    }
+                }
+            )))
             .on_key_up(cx.listener(|_this, _event: &KeyUpEvent, _window, _cx| {
                 // println!("{event:?}")
             }))
             .focusable()
             .track_focus(&self.focus_handle)
+            .resolved_style(self.resolved_style.clone())
     }
 }
 

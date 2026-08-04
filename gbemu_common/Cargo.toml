@@ -3,13 +3,15 @@ name = "gbemu_common"
 version = "0.1.0"
 edition = "2024"
 
+[dependencies]
+better_default.workspace = true
+bytemuck = { workspace = true, features = ["derive"] }
+databake = { version = "0.2.1", features = ["derive"] }
+palette = { workspace = true, features = ["bytemuck", "serializing"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+gpui = { workspace = true, optional = true }
+
 [features]
 gpui = ["dep:gpui"]
-
-[dependencies]
-serde = {workspace = true, features = ["derive"]}
-serde_json = {workspace = true}
-databake = {version = "0.2.1", features = ["derive"]}
-palette = {workspace = true, features = ["serializing"]}
-
-gpui = {workspace = true, optional = true}

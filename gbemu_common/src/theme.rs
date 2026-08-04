@@ -1,7 +1,11 @@
 extern crate alloc;
 use alloc::borrow::Cow;
+use better_default::Default;
+use bytemuck::{Pod, Zeroable};
 use databake::Bake;
-use palette::{Srgb, Srgba};
+use palette::{
+    FromColor, Hsla, IntoColor, Srgb, Srgba, convert::FromColorUnclamped, rgb::PackedRgba,
+};
 use serde::{Deserialize, Serialize, de::Visitor};
 use std::str::FromStr;
 
@@ -9,7 +13,7 @@ use std::str::FromStr;
 use gpui::{Hsla, Rgba, rgba};
 use palette::stimulus::IntoStimulus;
 
-#[derive(Bake, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Bake, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[databake(path = gbemu_common::theme)]
 #[serde(rename_all = "camelCase")]
 pub struct Theme {
@@ -52,9 +56,39 @@ pub enum Variant {
 
 struct ColorVisitor;
 
-#[derive(Debug, Default, Bake, Clone, Copy, PartialEq, Eq)]
-#[databake(path = gbemu_common::theme)]
-pub struct Color(pub u32);
+#[derive(Debug, Default, Clone, Copy, PartialEq, Pod, Zeroable)]
+#[repr(transparent)]
+pub struct Color(pub Srgba);
+
+impl core::ops::DerefMut for Color {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl core::ops::Deref for Color {
+    type Target = Srgba;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl databake::Bake for Color {
+    fn bake(&self, env: &databake::CrateEnv) -> databake::TokenStream {
+        env.insert("gbemu_common");
+        let color = u32::from(*self).bake(env);
+        databake::quote! {
+            gbemu_common::theme::Color::from(#color)
+        }
+    }
+}
+
+impl databake::BakeSize for Color {
+    fn borrows_size(&self) -> usize {
+        0
+    }
+}
 
 impl Visitor<'_> for ColorVisitor {
     type Value = Color;
@@ -70,7 +104,8 @@ impl Visitor<'_> for ColorVisitor {
         palette::Srgba::from_str(v)
             .or_else(|_| Srgb::from_str(v).map(|x| x.into()))
             .map_err(E::custom)
-            .map(Color::from)
+            .map(Srgba::from)
+            .map(Color)
     }
 }
 
@@ -85,55 +120,56 @@ impl<'de> Deserialize<'de> for Color {
 
 impl From<Color> for u32 {
     fn from(color: Color) -> u32 {
-        color.0
+        <Srgba<u8>>::from(color.0).into_u32::<palette::rgb::channels::Rgba>()
     }
 }
 
 impl From<u32> for Color {
-    fn from(color: u32) -> Color {
-        Color(color)
+    fn from(value: u32) -> Color {
+        Color(<Srgba<u8>>::from(value).into_format())
     }
 }
 
-impl From<Color> for palette::Srgba<u8> {
-    fn from(color: Color) -> Self {
-        color.0.into()
+impl<T> FromColor<T> for Color
+where
+    T: IntoColor<Srgba>,
+{
+    fn from_color(value: T) -> Self {
+        Self(value.into_color())
     }
 }
 
-impl<T: IntoStimulus<u8>> From<Srgba<T>> for Color {
-    fn from(color: Srgba<T>) -> Self {
-        Color(color.into_format().into())
+impl<T> From<Srgba<T>> for Color
+where
+    T: IntoStimulus<f32>,
+{
+    fn from(value: Srgba<T>) -> Self {
+        Self(value.into_format())
     }
 }
 
-cfg_select! {
-    feature = "gpui" => {
-        impl From<Color> for Rgba {
-            fn from(value: Color) -> Self {
-                rgba(value.0)
-            }
-        }
-
-        impl From<Color> for Hsla {
-            fn from(value: Color) -> Self {
-                Rgba::from(value).into()
-            }
-        }
-
-        impl From<Color> for gpui::Fill {
-            fn from(value: Color) -> Self {
-                Rgba::from(value).into()
-            }
-        }
-
-        impl From<Rgba> for Color {
-            fn from(value: Rgba) -> Self {
-                Color(value.into())
-            }
-        }
+impl From<Color> for Srgba {
+    fn from(value: Color) -> Self {
+        value.0
     }
-    _ => {}
+}
+
+impl From<Color> for Hsla {
+    fn from(t: Color) -> Self {
+        t.0.into_color()
+    }
+}
+
+impl FromColor<Color> for Hsla {
+    fn from_color(t: Color) -> Self {
+        t.0.into_color()
+    }
+}
+
+impl FromColor<Color> for Srgba {
+    fn from_color(t: Color) -> Self {
+        t.0.into_color()
+    }
 }
 
 impl Serialize for Color {
@@ -141,11 +177,11 @@ impl Serialize for Color {
     where
         S: serde::Serializer,
     {
-        Srgba::serialize(&Srgba::from(*self), serializer)
+        Srgba::<u8>::serialize(&self.0.into(), serializer)
     }
 }
 
-#[derive(Bake, Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Bake, Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[databake(path = gbemu_common::theme)]
 pub struct Palette {
     /// Background. Default Background

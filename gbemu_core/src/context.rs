@@ -40,6 +40,7 @@ pub struct IoRegisters {
     pub interrupt: InterruptFlag,
     pub lcd: LCDRegisters,
     pub audio: AudioRegisters,
+    pub bootrom_mapped: bool,
 }
 #[derive(Default)]
 pub struct JoypadRegister {
@@ -374,7 +375,7 @@ impl IoRegisters {
 
             0x50 => {
                 // Bootrom bank control, write-only
-                unimplemented_io_write(address, value)
+                self.bootrom_mapped = false;
             }
             0x80.. => unreachable!(),
             _ => {
@@ -907,43 +908,98 @@ pub struct MemoryBus {
     #[default([0; 0xFFFF-0xFF80])]
     pub(crate) hram: [u8; 0xFFFF - 0xFF80],
     pub(crate) ie: u8,
+    pub bootrom: Vec<u8>,
 }
 
 impl MemoryBus {
-    fn read_u8_with_source_no_debug(&self, address: u16, source: MemoryAccessSource) -> u8 {
-        if !matches!(source, MemoryAccessSource::Oam)
-            && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
-            && (matches!(
-                (self.io.lcd.dma_source_address, address),
-                (0x80..=0x9F, 0x8000..=0x9FFF)
-            ) || matches!(
-                (self.io.lcd.dma_source_address, address),
-                (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
-            ))
-        {
-            return 0xFF;
+    fn read_u8_with_source_impl(
+        &self,
+        address: u16,
+        source: MemoryAccessSource,
+        allow_debug: bool,
+    ) -> u8 {
+        let val = 'read: {
+            if !matches!(source, MemoryAccessSource::Oam)
+                && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
+                && (matches!(
+                    (self.io.lcd.dma_source_address, address),
+                    (0x80..=0x9F, 0x8000..=0x9FFF)
+                ) || matches!(
+                    (self.io.lcd.dma_source_address, address),
+                    (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
+                ))
+            {
+                break 'read 0xFF;
+            }
+            if self.io.bootrom_mapped
+                && let Some(&value) = self.bootrom.get(address as usize)
+            {
+                value
+            } else {
+                match address {
+                    0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.read_u8(address),
+                    0x8000..=0x9FFF => self.vram[address as usize - 0x8000],
+                    0xC000..=0xCFFF => self.wram1[address as usize - 0xC000],
+                    0xD000..=0xDFFF => self.wram2[address as usize - 0xD000],
+                    0xE000..=0xEFFF => {
+                        //Echo RAM
+                        self.wram1[address as usize - 0xE000]
+                    }
+                    0xF000..=0xFDFF => {
+                        //Echo RAM 2
+                        self.wram2[address as usize - 0xF000]
+                    }
+                    0xFE00..=0xFE9F => self.oam[address as usize - 0xFE00],
+                    0xFEA0..=0xFEFF => {
+                        0x00 // Prohibited Region, on DMG reads return $00
+                    }
+                    0xFF00..=0xFF7F => self.io.read_u8(address as u8),
+                    0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80],
+                    0xFFFF => self.ie,
+                }
+            }
+        };
+
+        if allow_debug && DEBUGGING_ENABLED.load(Ordering::Relaxed) {
+            let breakpoints = BREAKPOINTS.lock();
+
+            let hit_breakpoints = breakpoints
+                .watch_all
+                .iter()
+                .filter(|(_, breakpoint)| {
+                    breakpoint.enabled && breakpoint.breakpoint.addr == address
+                })
+                .map(|(id, breakpoint)| {
+                    (
+                        *id,
+                        BreakpointData::Read {
+                            addr: breakpoint.breakpoint.addr,
+                            value: val,
+                        },
+                    )
+                })
+                .chain(
+                    breakpoints
+                        .watch_read
+                        .iter()
+                        .filter(|(_, breakpoint)| {
+                            breakpoint.enabled && breakpoint.breakpoint.addr == address
+                        })
+                        .map(|(id, breakpoint)| {
+                            (
+                                *id,
+                                BreakpointData::Read {
+                                    addr: breakpoint.breakpoint.addr,
+                                    value: val,
+                                },
+                            )
+                        }),
+                );
+
+            HIT_BREAKPOINTS.lock().extend(hit_breakpoints);
         }
-        match address {
-            0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.read_u8(address),
-            0x8000..=0x9FFF => self.vram[address as usize - 0x8000],
-            0xC000..=0xCFFF => self.wram1[address as usize - 0xC000],
-            0xD000..=0xDFFF => self.wram2[address as usize - 0xD000],
-            0xE000..=0xEFFF => {
-                //Echo RAM
-                self.wram1[address as usize - 0xE000]
-            }
-            0xF000..=0xFDFF => {
-                //Echo RAM 2
-                self.wram2[address as usize - 0xF000]
-            }
-            0xFE00..=0xFE9F => self.oam[address as usize - 0xFE00],
-            0xFEA0..=0xFEFF => {
-                0x00 // Prohibited Region, on DMG reads return $00
-            }
-            0xFF00..=0xFF7F => self.io.read_u8(address as u8),
-            0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80],
-            0xFFFF => self.ie,
-        }
+
+        val
     }
 }
 
@@ -1007,6 +1063,22 @@ impl Context<MemoryBus> {
         }
         self.rom_info = Some(rom_info);
 
+        Ok(())
+    }
+
+    pub fn load_boot_rom(&mut self, path: Option<impl AsRef<Path>>) -> Result<(), LoadRomError> {
+        if let Some(path) = path
+            && !path.as_ref().is_empty()
+        {
+            self.memory.load_boot_rom(
+                &fs::read(path.as_ref())
+                    .map_err(|_err| LoadRomError::FileNotExists(path.as_ref().to_path_buf()))?,
+            )
+        } else {
+            self.memory
+                .load_boot_rom(include_bytes!("../bootrom/dmg_boot.bin"));
+        }
+        self.memory.io.bootrom_mapped = true;
         Ok(())
     }
 
@@ -1091,89 +1163,14 @@ pub trait Memory {
 
 impl Memory for MemoryBus {
     fn read_u8_with_source(&self, address: u16, source: MemoryAccessSource) -> u8 {
-        let val = 'read: {
-            if !matches!(source, MemoryAccessSource::Oam)
-                && matches!(self.io.lcd.dma_counter, DmaStatus::Running(_))
-                && (matches!(
-                    (self.io.lcd.dma_source_address, address),
-                    (0x80..=0x9F, 0x8000..=0x9FFF)
-                ) || matches!(
-                    (self.io.lcd.dma_source_address, address),
-                    (0x00..=0x7F | 0xC0..=0xFE, 0x0000..=0x7FFF | 0xC000..=0xFEFF)
-                ))
-            {
-                break 'read 0xFF;
-            }
-            match address {
-                0x0000..=0x7FFF | 0xA000..=0xBFFF => self.mapper.read_u8(address),
-                0x8000..=0x9FFF => self.vram[address as usize - 0x8000],
-                0xC000..=0xCFFF => self.wram1[address as usize - 0xC000],
-                0xD000..=0xDFFF => self.wram2[address as usize - 0xD000],
-                0xE000..=0xEFFF => {
-                    //Echo RAM
-                    self.wram1[address as usize - 0xE000]
-                }
-                0xF000..=0xFDFF => {
-                    //Echo RAM 2
-                    self.wram2[address as usize - 0xF000]
-                }
-                0xFE00..=0xFE9F => self.oam[address as usize - 0xFE00],
-                0xFEA0..=0xFEFF => {
-                    0x00 // Prohibited Region, on DMG reads return $00
-                }
-                0xFF00..=0xFF7F => self.io.read_u8(address as u8),
-                0xFF80..=0xFFFE => self.hram[address as usize - 0xFF80],
-                0xFFFF => self.ie,
-            }
-        };
-
-        if DEBUGGING_ENABLED.load(Ordering::Relaxed) {
-            let breakpoints = BREAKPOINTS.lock();
-
-            let hit_breakpoints = breakpoints
-                .watch_all
-                .iter()
-                .filter(|(_, breakpoint)| {
-                    breakpoint.enabled && breakpoint.breakpoint.addr == address
-                })
-                .map(|(id, breakpoint)| {
-                    (
-                        *id,
-                        BreakpointData::Read {
-                            addr: breakpoint.breakpoint.addr,
-                            value: val,
-                        },
-                    )
-                })
-                .chain(
-                    breakpoints
-                        .watch_read
-                        .iter()
-                        .filter(|(_, breakpoint)| {
-                            breakpoint.enabled && breakpoint.breakpoint.addr == address
-                        })
-                        .map(|(id, breakpoint)| {
-                            (
-                                *id,
-                                BreakpointData::Read {
-                                    addr: breakpoint.breakpoint.addr,
-                                    value: val,
-                                },
-                            )
-                        }),
-                );
-
-            HIT_BREAKPOINTS.lock().extend(hit_breakpoints);
-        }
-
-        val
+        self.read_u8_with_source_impl(address, source, true)
     }
 
     fn write_u8_with_source(&mut self, address: u16, value: u8, source: MemoryAccessSource) {
         let mut prev_value: Option<u8> = None;
 
         if DEBUGGING_ENABLED.load(Ordering::Relaxed) {
-            prev_value = Some(self.read_u8_with_source_no_debug(address, source))
+            prev_value = Some(self.read_u8_with_source_impl(address, source, false))
         }
 
         'write: {
@@ -1213,8 +1210,9 @@ impl Memory for MemoryBus {
                 0xFFFF => self.ie = value,
             }
         }
+
         if DEBUGGING_ENABLED.load(Ordering::Relaxed) {
-            let new_value = self.read_u8_with_source_no_debug(address, source);
+            let new_value = self.read_u8_with_source_impl(address, source, false);
             let breakpoints = BREAKPOINTS.lock();
             let prev_value = prev_value.unwrap();
 
@@ -1275,8 +1273,8 @@ impl Memory for MemoryBus {
         &mut self.ie
     }
 
-    fn load_boot_rom(&mut self, _rom: &[u8]) {
-        // self.rom[..rom.len()].copy_from_slice(rom);
+    fn load_boot_rom(&mut self, rom: &[u8]) {
+        self.bootrom = rom.to_vec();
     }
 
     fn load_rom(&mut self, rom: impl AsRef<[u8]>) {

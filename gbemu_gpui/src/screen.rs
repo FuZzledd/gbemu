@@ -2,6 +2,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use gpui::*;
+use palette::IntoColor;
 use tap::Tap;
 use uzi::using;
 
@@ -94,10 +95,11 @@ impl RenderOnce for Screen {
                             &[TextRun {
                                 len: text.len(),
                                 font,
-                                color: rgb(0xCCCCCC).into(),
+                                color: rgb(0xCCCCCC).into_color(),
                                 background_color: Some(black()),
                                 underline: None,
                                 strikethrough: None,
+                                letter_spacing: None,
                             }],
                             None,
                         );

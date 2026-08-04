@@ -1,2 +1,3 @@
-test-roms/** linguist-vendored
+test_roms/** linguist-vendored
 gbemu_core/test_fixtures/** linguist-vendored
+gbemu_gpui/assets/MaterialDesign-SVG-7.4.47/** linguist-vendored

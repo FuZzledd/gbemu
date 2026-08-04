@@ -5,11 +5,14 @@ use core::{
     ops::{BitAnd, BitOr, Index, IndexMut, Not, Shl, Shr},
     sync::atomic::{AtomicBool, Ordering},
 };
-use std::mem;
+use std::{mem, path::PathBuf};
 use std::{path::Path, sync::LazyLock};
 
+use gbemu_common::theme::Color;
+use palette::{IntoColor, Srgba};
 use parking_lot::Mutex;
 use rgb::{ComponentMap, Gray, Rgba};
+use serde::{Deserialize, Serialize};
 use tap::Conv;
 use tracing::instrument;
 
@@ -81,10 +84,42 @@ pub enum GameBoyButton {
     Down,
 }
 
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable, Serialize, Deserialize, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Palette<T = u8> {
     inner: [Rgba<T>; 4],
+}
+
+impl From<Palette<u8>> for [Color; 4] {
+    fn from(value: Palette<u8>) -> Self {
+        value
+            .inner
+            .map(|Rgba { r, g, b, a }| Srgba::from_components((r, g, b, a)).into())
+    }
+}
+
+impl From<[Color; 4]> for Palette<u8> {
+    fn from(value: [Color; 4]) -> Self {
+        value
+            .map(|color| {
+                let (r, g, b, a) = <Srgba<u8>>::from(color.0).into_components();
+                Rgba { r, g, b, a }
+            })
+            .into()
+    }
+}
+
+impl<U> Index<usize> for Palette<U> {
+    type Output = Rgba<U>;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.inner[index]
+    }
+}
+
+impl<U> IndexMut<usize> for Palette<U> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.inner[index]
+    }
 }
 
 impl<T: Borrow<Pixel>, U> IndexMut<T> for Palette<U> {
@@ -100,6 +135,7 @@ impl<T: Borrow<Pixel>, U> Index<T> for Palette<U> {
         &self.inner[*index.borrow() as usize]
     }
 }
+
 impl Default for Palette {
     fn default() -> Self {
         use ppu::Pixel::*;
@@ -114,6 +150,37 @@ impl Default for Palette {
         palette
     }
 }
+
+impl<T> From<[Rgba<T>; 4]> for Palette<T> {
+    fn from(value: [Rgba<T>; 4]) -> Self {
+        Self { inner: value }
+    }
+}
+
+impl<T> From<Palette<T>> for [Rgba<T>; 4] {
+    fn from(value: Palette<T>) -> [Rgba<T>; 4] {
+        value.inner
+    }
+}
+
+impl From<[u32; 4]> for Palette<u8> {
+    fn from(value: [u32; 4]) -> Self {
+        bytemuck::cast::<_, [Rgba<u8>; 4]>(value).into()
+    }
+}
+
+impl From<[[u8; 3]; 4]> for Palette<u8> {
+    fn from(value: [[u8; 3]; 4]) -> Self {
+        value.map(|[r, g, b]| [r, g, b, 0xFF]).into()
+    }
+}
+
+impl From<[[u8; 4]; 4]> for Palette<u8> {
+    fn from(value: [[u8; 4]; 4]) -> Self {
+        bytemuck::cast::<_, [Rgba<u8>; 4]>(value).into()
+    }
+}
+
 impl From<Palette<u8>> for Palette<f32> {
     fn from(value: Palette<u8>) -> Self {
         Palette {
@@ -270,7 +337,8 @@ impl GameBoy {
         self.cpu = CPU::default();
         self.context = Context::default();
 
-        self.cpu.load_debug_initial_state(&mut self.context);
+        // self.cpu.load_debug_initial_state(&mut self.context);
+        self.context.load_boot_rom(Option::<PathBuf>::None)?;
         self.context.load_rom(path)
     }
 }

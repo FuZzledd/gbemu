@@ -48,10 +48,14 @@ pub mod theme;
 pub mod debugger;
 pub mod settings;
 
+pub mod ext;
+
 use components::root::Root;
 
+#[derive(Clone)]
 struct GlobalState {
     gameboy: Arc<Mutex<GameBoy>>,
+    palette: Arc<Mutex<Palette>>,
     scale_factor: u32,
     integer_scaling: bool,
     fixed_size: bool,
@@ -117,6 +121,139 @@ thread_local! {
     pub static APP: Cell<Option<AsyncApp>> = const { Cell::new(None) };
 }
 
+pub struct PromptRenderer {
+    _level: PromptLevel,
+    message: String,
+    detail: Option<String>,
+    actions: Vec<PromptButton>,
+    focus: FocusHandle,
+}
+
+impl Render for PromptRenderer {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.global::<ThemeRegistry>().current_theme();
+
+        let background = theme.palette.background();
+        let foreground = theme.palette.foreground();
+        let border = theme.palette.gray();
+
+        let element_id = ElementId::from(("Prompt", cx.entity_id()));
+
+        drop(theme);
+
+        let prompt = div()
+            .cursor_default()
+            .track_focus(&self.focus)
+            .w_72()
+            .text_color(foreground)
+            .bg(background)
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .overflow_hidden()
+            .p_3()
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .justify_around()
+                    .child(div().overflow_hidden().child(self.message.clone())),
+            )
+            .children(self.detail.clone().map(|detail: String| {
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .justify_around()
+                    .text_sm()
+                    .mb_2()
+                    .child(div().child(detail))
+            }))
+            .children(self.actions.iter().enumerate().map(|(ix, action)| {
+                Button::new(
+                    Duration::from_millis(100),
+                    (element_id.clone(), ix.to_string()),
+                )
+                .flex()
+                .flex_row()
+                .justify_around()
+                .border_1()
+                .border_color(border)
+                .mt_1()
+                .rounded_xs()
+                .cursor_pointer()
+                .text_sm()
+                .child(action.label().clone())
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(PromptResponse(ix));
+                    cx.stop_propagation();
+                }))
+            }));
+
+        div()
+            .occlude()
+            .size_full()
+            .child(
+                div()
+                    .size_full()
+                    .bg(opaque_grey(0.5, 0.6))
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .backdrop_blur(px(2.0)),
+            )
+            .child(
+                div()
+                    .size_full()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .flex()
+                    .flex_col()
+                    .justify_around()
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .justify_around()
+                            .child(prompt),
+                    ),
+            )
+    }
+}
+
+impl EventEmitter<PromptResponse> for PromptRenderer {}
+
+impl Focusable for PromptRenderer {
+    fn focus_handle(&self, _: &crate::App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+fn prompt_renderer(
+    level: PromptLevel,
+    message: &str,
+    detail: Option<&str>,
+    actions: &[PromptButton],
+    handle: PromptHandle,
+    window: &mut Window,
+    cx: &mut App,
+) -> RenderablePromptHandle {
+    let renderer = cx.new(|cx| PromptRenderer {
+        _level: level,
+        message: message.to_string(),
+        detail: detail.map(ToString::to_string),
+        actions: actions.to_vec(),
+        focus: cx.focus_handle(),
+    });
+
+    let root = Root::new(renderer, window, cx);
+
+    handle.with_view(root, window, cx)
+}
+
 fn main() -> Result<()> {
     dioxus_devtools::connect_subsecond();
 
@@ -178,10 +315,6 @@ fn main() -> Result<()> {
     )?;
     stream.play()?;
 
-    fn to_serialized(x: impl Action + Serialize + Clone) -> (serde_json::Value, Box<dyn Action>) {
-        (serde_json::to_value(x.clone()).unwrap(), x.boxed_clone())
-    }
-
     gpui_platform::application()
         .with_assets(Icons)
         .run(move |cx: &mut App| {
@@ -208,6 +341,8 @@ fn main() -> Result<()> {
                 },
             )));
 
+            cx.set_prompt_builder(prompt_renderer);
+
             cx.default_global::<ThemeRegistry>();
             cx.default_global::<WindowMap>();
             cx.set_global(recent.clone());
@@ -215,6 +350,7 @@ fn main() -> Result<()> {
 
             let global_state = GlobalState {
                 gameboy: gameboy.clone(),
+                palette: Arc::new(Palette::default().into()),
                 scale_factor: 1,
                 integer_scaling: true,
                 fixed_size: false,
@@ -258,9 +394,17 @@ fn main() -> Result<()> {
                     |window, cx| {
                         window.set_app_id("uk.fuzzle.gbemu");
 
+                        cx.update_global::<GlobalState, _>(|global, cx| {
+                            global.fixed_size = !settings.video.fit_window;
+                            global.show_fps = settings.video.show_fps;
+                            global.integer_scaling = settings.video.integer_scaling;
+                            global.linear_filtering = settings.video.filtering;
+                            global.scale_factor = settings.video.scale;
+                        });
+
                         cx.set_global(settings);
 
-                        reload_keys(cx);
+                        reload_settings(cx);
 
                         let view = MainWindow::new(
                             gameboy.clone(),
@@ -281,16 +425,30 @@ fn main() -> Result<()> {
                         cx.on_action::<actions::file::OpenRom>(using!(
                             [gameboy, Arc::clone(&recent), recent_path, view],
                             move |_a, cx| {
+                                let mut library_path =
+                                    cx.global::<Settings>().emulator.library_path.clone();
+
+                                if !library_path.is_dir() {
+                                    library_path = env::current_dir().unwrap_or_else(|_| {
+                                        env::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+                                    });
+                                }
+
                                 let Some(rom_path) = rfd::FileDialog::new()
-                                    .add_filter("GameBoy ROMs (.gb/.gbc)", &["gb"])
+                                    .add_filter(
+                                        "All supported files",
+                                        &[
+                                            "gb", "gbc", "zip", "gz", "tar", "rar", "zst", "xz",
+                                            "png",
+                                        ],
+                                    )
+                                    .add_filter("GameBoy ROMs (.gb/.gbc)", &["gb", "gbc"])
                                     .add_filter(
                                         "Archives (.zip/.tar.gz/.rar/etc.)",
                                         &["zip", "gz", "tar", "rar", "zst", "xz"],
                                     )
                                     .add_filter("ROM Embedded Images (.png)", &["png"])
-                                    .set_directory(env::current_dir().unwrap_or_else(|_| {
-                                        env::home_dir().unwrap_or_else(|| PathBuf::from("/"))
-                                    }))
+                                    .set_directory(library_path)
                                     .pick_file()
                                 else {
                                     return;
@@ -337,11 +495,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-use crate::settings::Settings;
 use crate::{
-    assets::Icons, components::menubar::MenuBar, debugger::Debugger, screen::Screen,
-    settings::SettingsWindow,
+    assets::Icons, components::menubar::MenuBar, debugger::Debugger, ext::EntityStyleExt,
+    screen::Screen, settings::SettingsWindow,
 };
+use crate::{components::button::Button, settings::Settings};
 use crate::{components::titlebar::TitleBar, theme::ThemeRegistry};
 use uzi::using;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
@@ -383,7 +541,6 @@ impl DerefMut for WindowMap {
 impl Global for WindowMap {}
 
 struct MainWindow {
-    // app_menu_bar: Entity<AppMenuBar>,
     gameboy: Arc<Mutex<GameBoy>>,
     focus_handle: FocusHandle,
     menu_bar: Entity<MenuBar>,
@@ -629,13 +786,16 @@ impl MainWindow {
             })
         });
 
+        let global_state = cx.global::<GlobalState>().clone();
+
         thread::spawn(using!(
             [
                 gameboy,
                 render_state,
                 gpu_context,
                 frame_delta,
-                fast_forwarding
+                fast_forwarding,
+                global_state,
             ],
             move || {
                 let mut prev_frame_time = Instant::now();
@@ -655,7 +815,7 @@ impl MainWindow {
 
                         if redraw_requested {
                             redraw_screen(
-                                gameboy.clone(),
+                                global_state.clone(),
                                 render_state.clone(),
                                 gpu_context.clone(),
                             );
@@ -681,7 +841,11 @@ impl MainWindow {
             gameboy,
             recent,
             focus_handle: cx.focus_handle(),
-            menu_bar: cx.new(|_| MenuBar::new()),
+            menu_bar: cx.new(|_| {
+                let mut menubar = MenuBar::new();
+                menubar.hover(|style| style.opacity(1.0));
+                menubar
+            }),
             gpu_context,
             render_state,
             frame_delta,
@@ -707,12 +871,12 @@ impl MainWindow {
                         }
                         PlaybackMessage::StepTick(ticks) => {
                             if let Some(entity) = weak_entity.upgrade() {
-                                entity.update(cx, |this, _cx| this.step_tick(ticks));
+                                entity.update(cx, |this, cx| this.step_tick(ticks, cx));
                             }
                         }
                         PlaybackMessage::StepFrame(frames) => {
                             if let Some(entity) = weak_entity.upgrade() {
-                                entity.update(cx, |this, _cx| this.step_frame(frames));
+                                entity.update(cx, |this, cx| this.step_frame(frames, cx));
                             }
                         }
                     },
@@ -728,7 +892,9 @@ impl MainWindow {
         entity
     }
 
-    fn step_tick(&mut self, ticks: usize) {
+    fn step_tick(&mut self, ticks: usize, cx: &mut App) {
+        let global_state = cx.global::<GlobalState>();
+
         using!([self.gameboy, self.render_state, self.gpu_context], {
             PLAYING.store(false, Ordering::Relaxed);
             {
@@ -741,11 +907,12 @@ impl MainWindow {
                 }
             }
 
-            redraw_screen(gameboy, render_state, gpu_context);
+            redraw_screen(global_state.clone(), render_state, gpu_context);
         });
     }
 
-    fn step_frame(&mut self, frames: usize) {
+    fn step_frame(&mut self, frames: usize, cx: &mut App) {
+        let global_state = cx.global::<GlobalState>().clone();
         using!([self.gameboy, self.render_state, self.gpu_context], {
             PLAYING.store(false, Ordering::Relaxed);
             'outer: {
@@ -759,10 +926,14 @@ impl MainWindow {
                         }
                     }
 
-                    redraw_screen(gameboy.clone(), render_state.clone(), gpu_context.clone());
+                    redraw_screen(
+                        global_state.clone(),
+                        render_state.clone(),
+                        gpu_context.clone(),
+                    );
                 }
             }
-            redraw_screen(gameboy, render_state, gpu_context);
+            redraw_screen(global_state, render_state, gpu_context);
         })
     }
 }
@@ -853,37 +1024,53 @@ impl Render for MainWindow {
 
         let menu_bar = self.menu_bar.clone();
 
+        menu_bar.update_style(cx, |style, cx| {
+            *style = if window.is_fullscreen() {
+                style.clone().opacity(0.0)
+            } else {
+                style.clone().opacity(1.0)
+            }
+        });
+
+        let theme = cx.global::<ThemeRegistry>().current_theme();
+        let background = theme.palette.background();
+
+        drop(theme);
+
         div()
+            .bg(background)
             .track_focus(&self.focus_handle)
             .flex()
             .flex_col()
             .h_full()
             .w_full()
             .items_stretch()
-            .when(!window.is_fullscreen(), |this| {
-                this.child(
-                    TitleBar::new(("titlebar", self_entity_id))
-                        .flex()
-                        .items_stretch()
-                        .content_center()
-                        .child(
-                            div()
-                                .flex_grow()
-                                .flex()
-                                .justify_center()
-                                .items_center()
-                                .child("gbemuu"),
-                        ),
-                )
-            })
-            .child(div().child(menu_bar).when(window.is_fullscreen(), |this| {
-                this.opacity(0.0).hover(|style| style.opacity(1.0))
-            }))
+            .when_else(
+                !window.is_fullscreen(),
+                |this| {
+                    this.child(
+                        TitleBar::new(("titlebar", self_entity_id))
+                            .flex()
+                            .items_stretch()
+                            .content_center()
+                            .child(
+                                div()
+                                    .flex_grow_1()
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .child("gbemuu"),
+                            ),
+                    )
+                },
+                |this| this.bg(black()),
+            )
+            .child(menu_bar)
             .child(
                 div()
                     .id(("screen", self_entity_id))
                     .flex()
-                    .flex_grow()
+                    .flex_grow_1()
                     .child(
                         Screen::new(self.render_state.clone(), self.frame_delta.clone())
                             .min_w(px(160.0))
@@ -1028,10 +1215,10 @@ impl Render for MainWindow {
                 });
             })
             .on_action::<actions::playback::StepFrame>(
-                cx.listener(move |this, _event, _window, _cx| this.step_frame(1)),
+                cx.listener(move |this, _event, _window, cx| this.step_frame(1, cx)),
             )
             .on_action::<actions::playback::StepTick>(
-                cx.listener(|this, _event, _window, _cx| this.step_tick(1)),
+                cx.listener(|this, _event, _window, cx| this.step_tick(1, cx)),
             )
             .on_action::<actions::playback::ToggleFastForward>(cx.listener(
                 |this, _event, _window, cx| {
@@ -1113,13 +1300,15 @@ fn load_rom(
 }
 
 fn redraw_screen(
-    gameboy: Arc<Mutex<GameBoy>>,
+    global_state: GlobalState,
     render_state: Option<Arc<RenderState>>,
     gpu_context: Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>,
 ) {
-    let screen = *gameboy.lock().get_screen();
+    let screen = *global_state.gameboy.lock().get_screen();
+    let palette = global_state.palette.lock().clone();
+
     rayon::spawn(move || {
-        let palette = gbemu_core::Palette::default().conv::<Palette<f32>>();
+        let palette = palette.conv::<Palette<f32>>();
 
         if let Some(render_state) = render_state
             && let Some((device, queue)) = gpu_context
@@ -1236,4 +1425,15 @@ pub fn reload_keys(cx: &mut App) {
     );
 
     cx.global::<Settings>().input.clone().set_keybinds(cx);
+}
+
+pub fn reload_settings(cx: &mut App) {
+    let settings = cx.global::<Settings>();
+    let theme = settings.emulator.theme.clone();
+    let palette = Palette::clone(&settings.video.color_palette.into());
+
+    cx.global_mut::<ThemeRegistry>().set_current_theme(theme);
+    *cx.global_mut::<GlobalState>().palette.lock() = palette;
+
+    reload_keys(cx);
 }

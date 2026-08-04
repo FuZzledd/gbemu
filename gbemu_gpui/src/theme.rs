@@ -4,7 +4,7 @@ use core::cell::RefCell;
 use core::cell::{Ref, RefMut};
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{Arc, LazyLock},
 };
 
@@ -12,7 +12,7 @@ use gpui::Global;
 
 use gbemu_common::theme::*;
 
-pub static DEFAULT_THEMES: LazyLock<HashMap<Cow<'static, str>, Theme>> =
+pub static DEFAULT_THEMES: LazyLock<BTreeMap<Cow<'static, str>, Theme>> =
     LazyLock::new(|| include!(concat!(env!("OUT_DIR"), "/themes_generated")));
 
 #[derive(Default, Debug, Clone)]
@@ -21,25 +21,31 @@ pub struct ThemeRegistry {
 }
 
 impl ThemeRegistry {
-    pub fn themes(&self) -> Ref<'_, HashMap<Cow<'_, str>, Theme>> {
+    pub fn themes(&self) -> Ref<'_, BTreeMap<Cow<'static, str>, Theme>> {
         Ref::map(self.inner.borrow(), |registry| &registry.themes)
     }
 
-    pub fn themes_mut(&'static self) -> RefMut<'static, HashMap<Cow<'static, str>, Theme>> {
+    pub fn themes_mut(&self) -> RefMut<'_, BTreeMap<Cow<'static, str>, Theme>> {
         RefMut::map(self.inner.borrow_mut(), |registry| &mut registry.themes)
     }
 
-    pub fn current_theme(&self) -> Ref<'_, Theme> {
-        Ref::map(self.inner.borrow(), |registry| &registry.current_theme)
+    pub fn current_theme_key(&self) -> Cow<'static, str> {
+        self.inner.borrow().current_theme.clone()
     }
 
-    pub fn current_theme_mut(&'static self) -> RefMut<'static, Theme> {
-        RefMut::map(self.inner.borrow_mut(), |registry| {
-            &mut registry.current_theme
+    pub fn current_theme(&self) -> Ref<'_, Theme> {
+        Ref::map(self.inner.borrow(), |registry| {
+            &registry.themes[&registry.current_theme]
         })
     }
 
-    pub fn set_current_theme(&self, theme: Theme) {
+    pub fn current_theme_mut(&self) -> RefMut<'_, Theme> {
+        RefMut::map(self.inner.borrow_mut(), |registry| {
+            registry.themes.get_mut(&registry.current_theme).unwrap()
+        })
+    }
+
+    pub fn set_current_theme(&self, theme: Cow<'static, str>) {
         self.inner.borrow_mut().current_theme = theme;
     }
 }
@@ -49,7 +55,7 @@ impl Global for ThemeRegistry {}
 #[derive(Default, Debug)]
 pub struct ThemeRegistryInner {
     #[default(DEFAULT_THEMES.clone())]
-    themes: HashMap<Cow<'static, str>, Theme>,
-    #[default(DEFAULT_THEMES["Catppuccin Frappe"].clone())]
-    current_theme: Theme,
+    themes: BTreeMap<Cow<'static, str>, Theme>,
+    #[default("Catppuccin Frappe".into())]
+    current_theme: Cow<'static, str>,
 }

@@ -16,8 +16,6 @@ harness = false
 name = "mooneye"
 
 [dependencies]
-gbemu_common = {workspace = true}
-thiserror = {workspace = true}
 array-deque = { workspace = true }
 better_default = { workspace = true }
 bitvec = { workspace = true }
@@ -25,32 +23,34 @@ blip_buf = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
 bytes = { workspace = true }
 chapa = { workspace = true }
+chumsky = { workspace = true, features = ["nightly"] }
 crossbeam = { workspace = true }
 dasp = { workspace = true }
+docstr = "0.4.10"
+flume.workspace = true
+gbemu_common = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
+nom.workspace = true
+num-traits.workspace = true
+palette.workspace = true
 parking_lot = { workspace = true }
 paste = { workspace = true }
 png-achunk.workspace = true
 rayon.workspace = true
-rgb = { workspace = true }
+rgb = { workspace = true, features = ["serde"] }
 ringbuf = { workspace = true }
-spire_enum = {workspace = true}
+seq-macro.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+spire_enum = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
 tap = { workspace = true }
+thiserror = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true }
 unarc-rs.workspace = true
 uzi = { workspace = true }
-seq-macro.workspace = true
-nom.workspace = true
-num-traits.workspace = true
-palette.workspace = true
-chumsky = { workspace = true, features = ["nightly"] }
-flume.workspace = true
-docstr = "0.4.10"
 
 [dev-dependencies]
 base64 = { workspace = true }

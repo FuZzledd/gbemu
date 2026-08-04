@@ -1,6 +1,6 @@
 use crate::{
     GlobalState, WindowMap, WindowType,
-    components::{root::Root, titlebar::TitleBar},
+    components::{root::Root, scrollbar::ListScrollbar, titlebar::TitleBar},
     theme::ThemeRegistry,
 };
 use chumsky::Parser;
@@ -51,7 +51,7 @@ impl Debugger {
             text_input_state: cx.new(|cx| EditableTextState::new(StringStorage::default(), cx)),
             output: vec![],
             input_scroll_handle: Default::default(),
-            output_list_state: ListState::new(0, ListAlignment::Bottom, px(20.0)),
+            output_list_state: ListState::new(0, ListAlignment::Bottom, px(20.0)).measure_all(),
             receiver_task: None,
         });
 
@@ -105,6 +105,7 @@ impl Render for Debugger {
         let theme = cx.global::<ThemeRegistry>().current_theme();
 
         let lighter_background = theme.palette.lighter_background();
+        let background = theme.palette.background();
         let darker_background = theme.palette.darker_background();
         let dark_foreground = theme.palette.dark_foreground();
         let foreground = theme.palette.foreground();
@@ -117,6 +118,7 @@ impl Render for Debugger {
         let gameboy = global_state.gameboy.clone();
 
         div()
+            .bg(background)
             .text_sm()
             .overflow_hidden()
             .max_size_full()
@@ -159,29 +161,40 @@ impl Render for Debugger {
                             .max_w_full()
                             .justify_start()
                             .child(
-                                list(
-                                    self.output_list_state.clone(),
-                                    cx.processor(move |this, idx, _window, cx| {
-                                        div()
-                                            .px_2()
-                                            .text_color(foreground)
-                                            .font_family("Fira Mono")
-                                            .text_sm()
-                                            .child(styled_output_to_text(&this.output[idx], cx))
-                                            .into_any()
-                                    }),
-                                )
-                                .flex_basis(relative(1.0))
-                                .flex_grow_0()
-                                .flex_shrink()
-                                .bg(lighter_background)
-                                .whitespace_nowrap(),
+                                div()
+                                    .child(
+                                        list(
+                                            self.output_list_state.clone(),
+                                            cx.processor(move |this, idx, _window, cx| {
+                                                div()
+                                                    .px_2()
+                                                    .text_color(foreground)
+                                                    .font_family("Fira Mono")
+                                                    .text_sm()
+                                                    .child(styled_output_to_text(
+                                                        &this.output[idx],
+                                                        cx,
+                                                    ))
+                                                    .into_any()
+                                            }),
+                                        )
+                                        .size_full(),
+                                    )
+                                    .child(ListScrollbar::new(
+                                        (element_id.clone(), "output_scrollbar"),
+                                        self.output_list_state.clone(),
+                                    ))
+                                    .flex_basis(relative(1.0))
+                                    .flex_grow_0()
+                                    .flex_shrink_1()
+                                    .bg(lighter_background)
+                                    .whitespace_nowrap(),
                             )
                             .child(
                                 text_input((element_id.clone(), "input_line"))
                                     .flex_basis(auto())
                                     .flex_grow_0()
-                                    .flex_shrink()
+                                    .flex_shrink_1()
                                     .min_w_0()
                                     .w_full()
                                     .max_w_full()
@@ -232,6 +245,7 @@ impl Render for Debugger {
                                     }
 
                                     this.output_list_state.reset(this.output.len());
+                                    this.output_list_state.remeasure();
                                 }
                             ))),
                     ),

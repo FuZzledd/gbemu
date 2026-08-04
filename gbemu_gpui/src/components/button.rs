@@ -20,6 +20,8 @@ pub struct Button {
     children: Vec<AnyElement>,
     id: ElementId,
     disabled: bool,
+    resolved_style: Option<WeakEntity<StyleRefinement>>,
+    on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>,
 }
 impl ParentElement for Button {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
@@ -41,6 +43,8 @@ impl Button {
             children: vec![],
             id: id.into(),
             disabled: false,
+            resolved_style: None,
+            on_click: Box::new(|_, _, _| {}),
         }
     }
 
@@ -56,6 +60,19 @@ impl Button {
 
     pub fn disabled(mut self) -> Self {
         self.disabled = true;
+        self
+    }
+
+    pub fn resolved_style(mut self, entity: Entity<StyleRefinement>) -> Self {
+        self.resolved_style = Some(entity.downgrade());
+        self
+    }
+
+    pub fn on_click(
+        mut self,
+        callback: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_click = Box::new(callback);
         self
     }
 }
@@ -88,6 +105,8 @@ impl RenderOnce for Button {
             children,
             id,
             disabled,
+            resolved_style,
+            on_click,
         } = self;
 
         let state = window.use_keyed_state((id, "state"), cx, |_window, _cx| ButtonInner {
@@ -99,9 +118,9 @@ impl RenderOnce for Button {
 
         let theme = cx.global::<ThemeRegistry>().current_theme();
 
-        let background = background.unwrap_or(theme.palette.darker_background().into());
-        let hover_background = hover_background.unwrap_or(theme.palette.gray().into());
-        let active_background: Rgba = theme.palette.white().into();
+        let background = background.unwrap_or(theme.palette.darker_background().0);
+        let hover_background = hover_background.unwrap_or(theme.palette.gray().0);
+        let active_background = theme.palette.white();
         let text_color = theme.palette.foreground();
         let disabled_text_color = theme.palette.dark_foreground();
         let disabled_background = theme.palette.darkest_background();
@@ -124,17 +143,19 @@ impl RenderOnce for Button {
                         .clamp(0.0, 1.0)
             }
 
-            if this.hover_progress > 0.0 || this.hover_progress < 1.0 {
+            if this.hover_progress > 0.0 && this.hover_progress < 1.0 {
                 window.request_animation_frame();
             }
         });
         let current_view = window.current_view();
 
-        base.id(("button_container", state.entity_id()))
+        let mut element = base
+            .id(("button_container", state.entity_id()))
             .when_else(
                 !disabled,
                 |this| {
                     this.text_color(text_color)
+                        .on_click(move |event, window, cx| (on_click)(event, window, cx))
                         .bg(background.lerp(
                             &hover_background,
                             ease_in_out(state.read(cx).hover_progress),
@@ -162,7 +183,14 @@ impl RenderOnce for Button {
                     }),
             )
             .tap_mut(|this| this.style().refine(&style))
-            .children(children)
+            .children(children);
+
+        if let Some(resolved_style) = resolved_style
+            && let Some(resolved_style) = resolved_style.upgrade()
+        {
+            resolved_style.write(cx, element.style().clone());
+        }
+        element
     }
 }
 
