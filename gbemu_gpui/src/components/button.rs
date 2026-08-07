@@ -124,7 +124,7 @@ impl RenderOnce for Button {
                         .clamp(0.0, 1.0)
             }
 
-            if this.hover_progress > 0.0 || this.hover_progress < 1.0 {
+            if this.hover_progress > 0.0 && this.hover_progress < 1.0 {
                 window.request_animation_frame();
             }
         });
