@@ -1,7 +1,7 @@
 use gpui::{prelude::*, *};
 use uzi::using;
 
-use crate::{components::menubar::ElementExt, theme::ThemeRegistry};
+use crate::{components::menubarbutton::ElementExt, theme::ThemeRegistry};
 
 #[derive(IntoElement)]
 pub struct Scrollbar {

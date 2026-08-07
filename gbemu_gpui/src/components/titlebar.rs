@@ -46,11 +46,8 @@ impl RenderOnce for TitleBar {
         let theme = cx.global::<ThemeRegistry>().current_theme();
 
         let background = theme.palette.darkest_background();
-
         let foreground = theme.palette.foreground();
-
         let border = theme.palette.gray();
-
         let red = theme.palette.red();
 
         drop(theme);
@@ -109,90 +106,99 @@ impl RenderOnce for TitleBar {
                     .items_center()
                     .justify_center()
                     .child(
-                        Button::new(
-                            Duration::from_millis(300),
-                            (self.id.clone(), "titlebar-minimize"),
-                        )
-                        .window_control_area(WindowControlArea::Max)
-                        .on_any_mouse_down(|_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .on_click(|_event, window, cx| {
-                            cx.stop_propagation();
-                            window.minimize_window();
-                        })
-                        .flex()
-                        .items_center()
-                        .child(
-                            svg()
-                                .path("icons/window-minimize")
-                                .size(relative(0.8))
-                                .text_color(foreground),
-                        )
-                        .size_5()
-                        .rounded_2xl()
-                        .justify_center(),
+                        div()
+                            .id((self.id.clone(), "minimize-wrapper"))
+                            .window_control_area(WindowControlArea::Max)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size_5()
+                            .rounded_2xl()
+                            .on_any_mouse_down(|_event, _window, cx| {
+                                cx.stop_propagation();
+                            })
+                            .on_click(|_event, window, cx| {
+                                cx.stop_propagation();
+                                window.minimize_window();
+                            })
+                            .child(Button::new(
+                                cx,
+                                (self.id.clone(), "titlebar-minimize-btn"),
+                                Duration::from_millis(300),
+                            ))
+                            .child(
+                                svg()
+                                    .path("icons/window-minimize")
+                                    .size(relative(0.8))
+                                    .text_color(foreground),
+                            ),
                     )
                     .child(
-                        Button::new(
-                            Duration::from_millis(300),
-                            (self.id.clone(), "titlebar-maximize"),
-                        )
-                        .window_control_area(WindowControlArea::Max)
-                        .on_any_mouse_down(|_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .on_click(|_event, window, cx| {
-                            cx.stop_propagation();
-                            window.zoom_window();
-                        })
-                        .flex()
-                        .items_center()
-                        .child(
-                            svg()
-                                .path(if window.is_maximized() {
-                                    "icons/window-restore"
-                                } else {
-                                    "icons/window-maximize"
-                                })
-                                .size(relative(0.8))
-                                .text_color(foreground),
-                        )
-                        .size_5()
-                        .rounded_2xl()
-                        .justify_center(),
+                        div()
+                            .id((self.id.clone(), "maximize-wrapper"))
+                            .window_control_area(WindowControlArea::Max)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size_5()
+                            .rounded_2xl()
+                            .on_any_mouse_down(|_event, _window, cx| {
+                                cx.stop_propagation();
+                            })
+                            .on_click(|_event, window, cx| {
+                                cx.stop_propagation();
+                                window.zoom_window();
+                            })
+                            .child(Button::new(
+                                cx,
+                                (self.id.clone(), "titlebar-maximize-btn"),
+                                Duration::from_millis(300),
+                            ))
+                            .child(
+                                svg()
+                                    .path(if window.is_maximized() {
+                                        "icons/window-restore"
+                                    } else {
+                                        "icons/window-maximize"
+                                    })
+                                    .size(relative(0.8))
+                                    .text_color(foreground),
+                            ),
                     )
                     .child(
-                        Button::new(
-                            Duration::from_millis(300),
-                            (self.id.clone(), "titlebar-close"),
-                        )
-                        .hover_background(red)
-                        .window_control_area(WindowControlArea::Close)
-                        .on_any_mouse_down(|_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .on_click(|_event, window, cx| {
-                            cx.stop_propagation();
-                            window
-                                .root::<Root>()
-                                .unwrap()
-                                .unwrap()
-                                .update(cx, |_root, cx| {
-                                    cx.emit(CloseRequestEvent);
-                                })
-                        })
-                        .flex()
-                        .items_center()
-                        .child(
-                            svg()
-                                .path("icons/window-close")
-                                .size(relative(0.8))
-                                .text_color(foreground),
-                        )
-                        .size_5()
-                        .rounded_2xl()
-                        .justify_center(),
+                        div()
+                            .id((self.id.clone(), "close-wrapper"))
+                            .window_control_area(WindowControlArea::Close)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size_5()
+                            .rounded_2xl()
+                            .hover(|this| this.bg(red))
+                            .on_any_mouse_down(|_event, _window, cx| {
+                                cx.stop_propagation();
+                            })
+                            .on_click(|_event, window, cx| {
+                                cx.stop_propagation();
+                                window
+                                    .root::<Root>()
+                                    .unwrap()
+                                    .unwrap()
+                                    .update(cx, |_root, cx| {
+                                        cx.emit(CloseRequestEvent);
+                                    })
+                            })
+                            .child(Button::new(
+                                cx,
+                                (self.id.clone(), "titlebar-close-btn"),
+                                Duration::from_millis(300),
+                            ))
+                            .child(
+                                svg()
+                                    .path("icons/window-close")
+                                    .size(relative(0.8))
+                                    .text_color(foreground),
+                            ),
                     ),
             )
     }
