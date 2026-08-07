@@ -1,7 +1,10 @@
+pub mod bindablebutton;
 pub mod button;
 pub mod menubar;
+pub mod menubarbutton;
 pub mod root;
 pub mod scrollbar;
+pub mod serializedaction;
 pub mod titlebar;
 
 pub struct DefaultValue;

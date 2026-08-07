@@ -213,16 +213,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "annotate-snippets"
-version = "0.11.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "710e8eae58854cdc1790fcb56cca04d712a17be849eeb81da2a724bf4bae2bc4"
-dependencies = [
- "anstyle",
- "unicode-width",
-]
-
-[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -358,7 +348,7 @@ version = "0.38.0+1.3.281"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bb44936d800fea8f016d7f2311c6a4f97aebd5dc86f09906139ec848cf3a46f"
 dependencies = [
- "libloading 0.8.9",
+ "libloading",
 ]
 
 [[package]]
@@ -714,25 +704,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bindgen"
-version = "0.72.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
-dependencies = [
- "annotate-snippets",
- "bitflags 2.13.1",
- "cexpr",
- "clang-sys",
- "itertools 0.13.0",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 2.1.3",
- "shlex 1.3.0",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1047,16 +1018,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cfg-expr"
-version = "0.20.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb693542bcafa528e198be0ebd9d3632ca5b7c93dbe7237460e199910835997c"
-dependencies = [
- "smallvec",
- "target-lexicon",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1154,7 +1115,7 @@ checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
 dependencies = [
  "glob",
  "libc",
- "libloading 0.8.9",
+ "libloading",
 ]
 
 [[package]]
@@ -1423,12 +1384,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cookie-factory"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9885fa71e26b8ab7855e2ec7cae6e9b380edff76cd052e07c683a0319d51b3a2"
-
-[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1611,8 +1566,6 @@ dependencies = [
  "block2 0.6.2",
  "coreaudio-rs",
  "dasp_sample",
- "futures",
- "jack",
  "jni",
  "js-sys",
  "libc",
@@ -1628,8 +1581,6 @@ dependencies = [
  "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
- "pipewire",
- "pulseaudio",
  "web-sys",
  "windows 0.62.2",
  "windows-core 0.62.2",
@@ -2213,7 +2164,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading",
 ]
 
 [[package]]
@@ -2298,17 +2249,6 @@ name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
-
-[[package]]
-name = "enum-primitive-derive"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba7795da175654fe16979af73f81f26a8ea27638d8d9823d317016888a63dc4c"
-dependencies = [
- "num-traits",
- "quote",
- "syn 2.0.119",
-]
 
 [[package]]
 name = "enumflags2"
@@ -3130,13 +3070,13 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "accesskit",
  "anyhow",
  "async-channel",
  "async-task",
- "bindgen 0.71.1",
+ "bindgen",
  "bitflags 2.13.1",
  "block",
  "cbindgen",
@@ -3210,7 +3150,7 @@ dependencies = [
 [[package]]
 name = "gpui_ce_util"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "anyhow",
  "log",
@@ -3219,7 +3159,7 @@ dependencies = [
 [[package]]
 name = "gpui_collections"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "indexmap",
  "rustc-hash 2.1.3",
@@ -3228,7 +3168,7 @@ dependencies = [
 [[package]]
 name = "gpui_derive_refineable"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3248,7 +3188,7 @@ dependencies = [
 [[package]]
 name = "gpui_linux"
 version = "0.1.0"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -3298,7 +3238,7 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3343,7 +3283,7 @@ dependencies = [
 [[package]]
 name = "gpui_macros"
 version = "0.1.0"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3354,10 +3294,10 @@ dependencies = [
 [[package]]
 name = "gpui_media"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "anyhow",
- "bindgen 0.71.1",
+ "bindgen",
  "core-foundation 0.10.0",
  "core-video",
  "ctor",
@@ -3369,7 +3309,7 @@ dependencies = [
 [[package]]
 name = "gpui_platform"
 version = "0.1.0"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "console_error_panic_hook",
  "gpui",
@@ -3382,7 +3322,7 @@ dependencies = [
 [[package]]
 name = "gpui_refineable"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "gpui_derive_refineable",
 ]
@@ -3390,7 +3330,7 @@ dependencies = [
 [[package]]
 name = "gpui_scheduler"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "async-task",
  "backtrace",
@@ -3405,7 +3345,7 @@ dependencies = [
 [[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "schemars",
  "serde",
@@ -3415,7 +3355,7 @@ dependencies = [
 [[package]]
 name = "gpui_sum_tree"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "heapless",
  "log",
@@ -3426,7 +3366,7 @@ dependencies = [
 [[package]]
 name = "gpui_web"
 version = "0.1.0"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -3449,7 +3389,7 @@ dependencies = [
 [[package]]
 name = "gpui_wgpu"
 version = "0.1.0"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3478,7 +3418,7 @@ dependencies = [
 [[package]]
 name = "gpui_windows"
 version = "0.1.0"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -3506,7 +3446,7 @@ dependencies = [
 [[package]]
 name = "gpui_zed_util"
 version = "0.2.2"
-source = "git+https://github.com/FuZzledd/gpui-ce#d4a133a5c323f44322e46ea6212811cf2ca51310"
+source = "git+https://github.com/gpui-ce/gpui-ce#568271c01c5a9d640d7b091e5bfd136b04035f28"
 dependencies = [
  "anyhow",
  "async-fs",
@@ -4107,33 +4047,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
-name = "jack"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7811b07bcac5dafabf814ab52c4b0ca9b7948aa1e279f572f03aa6544d47d27"
-dependencies = [
- "bitflags 2.13.1",
- "jack-sys",
- "lazy_static",
- "libc",
- "log",
-]
-
-[[package]]
-name = "jack-sys"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6013b7619b95a22b576dfb43296faa4ecbe40abbdb97dfd22ead520775fc86ab"
-dependencies = [
- "bitflags 1.3.2",
- "lazy_static",
- "libc",
- "libloading 0.7.4",
- "log",
- "pkg-config",
-]
-
-[[package]]
 name = "jni"
 version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4228,7 +4141,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6aae1df220ece3c0ada96b8153459b67eebe9ae9212258bb0134ae60416fdf76"
 dependencies = [
  "libc",
- "libloading 0.8.9",
+ "libloading",
  "pkg-config",
 ]
 
@@ -4339,16 +4252,6 @@ dependencies = [
 
 [[package]]
 name = "libloading"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
-dependencies = [
- "cfg-if",
- "winapi",
-]
-
-[[package]]
-name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
@@ -4370,33 +4273,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c943259e342f1e06ff2da7a83eabdfe7f92ce10262688dbf1895ff0b3e6e4652"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "libspa"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2909f3be29d674e7f10604aff18d1bbe1bb03c4cd61c8a8ba19c0b1d162f7d4e"
-dependencies = [
- "bitflags 2.13.1",
- "cc",
- "cookie-factory",
- "libc",
- "libspa-sys",
- "nom 8.0.0",
- "rustix 1.1.4",
- "system-deps",
-]
-
-[[package]]
-name = "libspa-sys"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69ad52764fca54818486f3cf75afec844d1f1a1568c24dcee25d41b1ab007dda"
-dependencies = [
- "bindgen 0.72.1",
- "cc",
- "system-deps",
 ]
 
 [[package]]
@@ -4697,18 +4573,6 @@ checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
 dependencies = [
  "adler2",
  "simd-adler32",
-]
-
-[[package]]
-name = "mio"
-version = "1.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d65c71f1ce40ab09135ce117d742b9f8a19ff91a41a8b57ed50bc2de59c427"
-dependencies = [
- "libc",
- "log",
- "wasi",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5631,31 +5495,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pipewire"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8585aba8a52ad74ccc633b8e293c1dc4277976bd5d510b925533f34fd6685f38"
-dependencies = [
- "bitflags 2.13.1",
- "libc",
- "libspa",
- "libspa-sys",
- "pipewire-sys",
- "rustix 1.1.4",
-]
-
-[[package]]
-name = "pipewire-sys"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2089f245b548723e60325773c27f586b7a2372c79ea941b246cd0d654706adc"
-dependencies = [
- "bindgen 0.72.1",
- "libspa-sys",
- "system-deps",
-]
-
-[[package]]
 name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5905,22 +5744,6 @@ name = "pulp-wasm-simd-flag"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
-
-[[package]]
-name = "pulseaudio"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d70623bd7967a9ca4c2ae0e807fc380b291f98480fc037042305ec643a4d3373"
-dependencies = [
- "bitflags 2.13.1",
- "byteorder",
- "enum-primitive-derive",
- "futures",
- "log",
- "mio",
- "num-traits",
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "pxfm"
@@ -7098,7 +6921,7 @@ checksum = "9cc79674bd55726e6b123204403389400229a95fe4a3b2c5453dada70b06ca95"
 dependencies = [
  "js-sys",
  "libc",
- "libloading 0.8.9",
+ "libloading",
  "memfd",
  "memmap2",
  "serde",
@@ -7286,19 +7109,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "system-deps"
-version = "7.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "396a35feb67335377e0251fcbc1092fc85c484bd4e3a7a54319399da127796e7"
-dependencies = [
- "cfg-expr",
- "heck 0.5.0",
- "pkg-config",
- "toml 1.1.3+spec-1.1.0",
- "version-compare",
-]
-
-[[package]]
 name = "taffy"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7344,12 +7154,6 @@ dependencies = [
  "libc",
  "xattr",
 ]
-
-[[package]]
-name = "target-lexicon"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
 name = "tempfile"
@@ -8044,12 +7848,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "version-compare"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03c2856837ef78f57382f06b2b8563a2f512f7185d732608fd9176cb3b8edf0e"
-
-[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8420,7 +8218,7 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
- "libloading 0.8.9",
+ "libloading",
  "log",
  "naga",
  "ndk-sys",
@@ -9613,47 +9411,3 @@ dependencies = [
  "syn 2.0.119",
  "winnow 1.0.4",
 ]
-
-[[patch.unused]]
-name = "stylo_taffy"
-version = "0.3.0-alpha.6"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.6"
-
-[[patch.unused]]
-name = "blitz-dom"
-version = "0.3.0-alpha.6"
-
-[[patch.unused]]
-name = "blitz-html"
-version = "0.3.0-alpha.6"
-
-[[patch.unused]]
-name = "blitz-net"
-version = "0.3.0-alpha.6"
-
-[[patch.unused]]
-name = "blitz-paint"
-version = "0.3.0-alpha.6"
-
-[[patch.unused]]
-name = "blitz-shell"
-version = "0.3.0-alpha.6"
-
-[[patch.unused]]
-name = "blitz-traits"
-version = "0.3.0-alpha.6"
-
-[[patch.unused]]
-name = "dioxus-native"
-version = "0.7.0"
-
-[[patch.unused]]
-name = "dioxus-native-dom"
-version = "0.7.0"
-
-[[patch.unused]]
-name = "stylo_taffy"
-version = "0.3.0-alpha.6"

@@ -1,4 +1,8 @@
-use crate::components::{button::Button, root::CloseRequestEvent, scrollbar::Scrollbar};
+use crate::binds;
+use crate::components::serializedaction::SerializedAction;
+use crate::components::{
+    bindablebutton::BindableButton, button::Button, root::CloseRequestEvent, scrollbar::Scrollbar,
+};
 use crate::theme::ThemeRegistry;
 use crate::{APP, WindowMap, WindowType};
 use crate::{EtceteraStrategy, components::titlebar::TitleBar};
@@ -23,15 +27,19 @@ use std::{
 };
 use std::{collections::HashMap, fs};
 use std::{fmt::Debug, path::PathBuf};
-use tap::{Conv, Tap};
+use tap::Conv;
 use uzi::using;
 
-#[macro_export]
-macro_rules! binds {
-    ($(($display:expr, $action:expr)),* $(,)?) => {
-        vec![$(( $display, $action.to_serialized() )),*]
-    }
+// ============== KEYBIND PROVIDER TRAIT ==============
+
+pub trait KeybindProvider {
+    fn get_bindings_for_action(&self, action: &SerializedAction) -> Option<String>;
+    fn set_binding_for_action(&mut self, action: &SerializedAction, keystroke: String);
+    fn get_keymap_mut(&mut self) -> &mut Keymap;
+    fn get_keymap(&self) -> &Keymap;
 }
+
+// ============== SETTINGS STRUCTS ==============
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Settings {
@@ -41,6 +49,54 @@ pub struct Settings {
     pub(crate) emulator: EmulatorSettings,
 }
 impl Global for Settings {}
+
+// Implement KeybindProvider for Settings
+impl KeybindProvider for Settings {
+    fn get_bindings_for_action(&self, action: &SerializedAction) -> Option<String> {
+        self.input
+            .keybinds
+            .get(&action.json_value())
+            .map(|keybinds| {
+                keybinds
+                    .iter()
+                    .map(|(keystrokes, _action)| {
+                        keystrokes
+                            .split_whitespace()
+                            .filter_map(|keystroke| {
+                                Keystroke::parse(keystroke)
+                                    .ok()
+                                    .map(|k| k.to_string().to_case(convert_case::Case::Train))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+    }
+
+    fn set_binding_for_action(&mut self, action: &SerializedAction, keystroke: String) {
+        let action_value = action.json_value();
+        // Clone the action's boxed action to store it
+        let action_clone = action.action();
+        self.input
+            .keybinds
+            .entry(action_value)
+            .or_insert_with(Vec::new)
+            .push((
+                keystroke,
+                SerializedAction(action.json_value(), action_clone),
+            ));
+    }
+
+    fn get_keymap_mut(&mut self) -> &mut Keymap {
+        &mut self.input.keybinds
+    }
+
+    fn get_keymap(&self) -> &Keymap {
+        &self.input.keybinds
+    }
+}
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct InputSettings {
@@ -52,10 +108,12 @@ impl InputSettings {
     pub fn set_keybinds(&self, cx: &mut App) {
         let keyboard_mapper = cx.keyboard_mapper().clone();
         cx.bind_keys(self.keybinds.values().flat_map(|keybinds| {
-            keybinds.iter().map(|(keystroke, action)| {
+            keybinds.iter().map(|(keystroke, serialized_action)| {
+                // Extract the boxed action from SerializedAction
+                let action = serialized_action.action();
                 KeyBinding::load(
                     keystroke,
-                    action.boxed_clone(),
+                    action,
                     None,
                     false,
                     None,
@@ -76,44 +134,11 @@ pub struct EmulatorSettings {
     pub(crate) library_path: PathBuf,
 }
 
-pub trait SerializableAction: Action {
-    fn to_serialized(&self) -> SerializedAction;
-}
-
-impl<T> SerializableAction for T
-where
-    T: Action + Serialize,
-{
-    fn to_serialized(&self) -> SerializedAction {
-        let value = serde_json::to_value(self).unwrap();
-        match value {
-            Value::Null => SerializedAction(self.name().into(), self.boxed_clone()),
-            other => SerializedAction([self.name().into(), other].into(), self.boxed_clone()),
-        }
-    }
-}
-
-pub struct SerializedAction(pub Value, pub Box<dyn Action>);
-
-impl Clone for SerializedAction {
-    fn clone(&self) -> Self {
-        Self(self.0.clone(), self.1.boxed_clone())
-    }
-}
-
-impl SerializedAction {
-    pub fn json_value(&self) -> Value {
-        self.0.clone()
-    }
-
-    pub fn action(&self) -> Box<dyn Action> {
-        self.1.boxed_clone()
-    }
-}
+// ============== KEYMAP ==============
 
 #[derive(Default, Debug)]
 pub struct Keymap {
-    pub bindings: HashMap<Value, Vec<(String, Box<dyn Action>)>>,
+    pub bindings: HashMap<Value, Vec<(String, SerializedAction)>>,
 }
 
 impl Eq for Keymap {}
@@ -143,7 +168,7 @@ impl Clone for Keymap {
                         key.clone(),
                         value
                             .iter()
-                            .map(|(keystroke, action)| (keystroke.clone(), action.boxed_clone()))
+                            .map(|(keystroke, action)| (keystroke.clone(), action.clone()))
                             .collect(),
                     )
                 })
@@ -153,7 +178,7 @@ impl Clone for Keymap {
 }
 
 impl Deref for Keymap {
-    type Target = HashMap<Value, Vec<(String, Box<dyn Action>)>>;
+    type Target = HashMap<Value, Vec<(String, SerializedAction)>>;
 
     fn deref(&self) -> &Self::Target {
         &self.bindings
@@ -193,7 +218,7 @@ impl<'de> Deserialize<'de> for Keymap {
 
         let raw_bindings = deserializer.deserialize_seq(BindingsVisitor)?;
 
-        let mut bindings = HashMap::<Value, Vec<(String, Box<dyn Action>)>>::new();
+        let mut bindings = HashMap::<Value, Vec<(String, SerializedAction)>>::new();
 
         APP.with(move |cx| {
             let taken_cx = cx.take();
@@ -204,11 +229,14 @@ impl<'de> Deserialize<'de> for Keymap {
                     .clone();
 
                 for (keystrokes, action_raw) in raw_bindings {
-                    let mut action_input: Option<SharedString> = None;
+                    // Build the action from the serialized data
                     let action = match action_raw.clone() {
-                        Value::String(ref name) => cx.update(move |cx| {
-                            cx.build_action(name, None)
-                                .map_err(|err| de::Error::custom(format!("Couldn't build action {err}, name={name}")))
+                        Value::String(ref name) => cx.update(|cx| {
+                            cx.build_action(name, None).map_err(|err| {
+                                de::Error::custom(format!(
+                                    "Couldn't build action {err}, name={name}"
+                                ))
+                            })
                         })?,
                         Value::Array(array) => {
                             if array.len() != 2 {
@@ -223,15 +251,22 @@ impl<'de> Deserialize<'de> for Keymap {
                             };
 
                             cx.update(|cx| {
-                                action_input = Some(array[1].to_string().into());
                                 cx.build_action(name, Some(array[1].clone()))
-                                    .map_err(|err| de::Error::custom(format!("Couldn't build action {err}, name={name}, action_input = {action_input:?}")))
+                                    .map_err(|err| {
+                                        de::Error::custom(format!(
+                                            "Couldn't build action {err}, name={name}"
+                                        ))
+                                    })
                             })?
                         }
                         _ => return Err(de::Error::custom("Expected a valid action")),
                     };
 
-                    bindings.entry(action_raw).or_default().push((keystrokes, action));
+                    let serialized_action = SerializedAction(action_raw.clone(), action);
+                    bindings
+                        .entry(action_raw)
+                        .or_default()
+                        .push((keystrokes, serialized_action));
                 }
 
                 Ok(Keymap { bindings })
@@ -258,10 +293,14 @@ impl Serialize for Keymap {
     }
 }
 
+// ============== SETTINGS WINDOW ==============
+
 pub struct SettingsWindow {
     pub settings: Entity<Settings>,
     pub input: AnyView,
     emulator: AnyView,
+    close_btn: Entity<Button>,
+    save_btn: Entity<Button>,
 }
 
 impl SettingsWindow {
@@ -318,15 +357,20 @@ impl SettingsWindow {
     }
 
     pub fn new(_window: &mut Window, cx: &mut App) -> Entity<Self> {
+        eprintln!("Created SettingsWindow");
         let settings = cx.new(|cx| cx.global::<Settings>().clone());
 
         let input = AnyView::from(InputSettingsTab::new(settings.clone(), cx));
         let emulator = AnyView::from(EmulatorSettingsTab::new(settings.clone(), cx));
+        let close_btn = Button::new(cx, "close-btn", Duration::from_millis(100));
+        let save_btn = Button::new(cx, "save-btn", Duration::from_millis(100));
 
         let entity = cx.new(|_cx| Self {
             settings,
             input,
             emulator,
+            close_btn,
+            save_btn,
         });
 
         cx.observe_release(&entity, |_this, cx| {
@@ -414,32 +458,41 @@ impl Render for SettingsWindow {
                     .p_1()
                     .gap_2()
                     .child(
-                        Button::new(Duration::from_millis(100), (element_id.clone(), "Close"))
-                            .background(lighter_background)
+                        div()
+                            .id((element_id.clone(), "close-btn-wrapper"))
+                            .bg(lighter_background)
                             .px_2()
                             .py(rems(0.1))
                             .rounded_sm()
-                            .child("Close")
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
                             .on_click(cx.listener(move |_this, event: &ClickEvent, window, cx| {
                                 if event.standard_click() {
                                     window.root::<Root>().unwrap().unwrap().update(cx, |_, cx| {
                                         cx.emit(CloseRequestEvent);
                                     })
                                 }
-                            })),
+                            }))
+                            .child(self.close_btn.clone())
+                            .child("Close"),
                     )
                     .child(
-                        Button::new(Duration::from_millis(100), (element_id.clone(), "Save"))
-                            .background(blue)
-                            .hover_background(lighter_blue)
+                        div()
+                            .id((element_id.clone(), "save-btn-wrapper"))
+                            .bg(blue)
+                            .hover(|this| this.bg(lighter_blue))
                             .px_2()
                             .py(rems(0.1))
-                            .child("Save")
                             .rounded_sm()
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .when_else(
                                 *unsaved_changes.read(cx),
                                 using!([unsaved_changes], |this| {
-                                    this.on_click(cx.listener(
+                                    this.cursor_pointer().on_click(cx.listener(
                                         move |this, event: &ClickEvent, _window, cx| {
                                             if event.standard_click() {
                                                 let settings = this.settings.read(cx).clone();
@@ -459,12 +512,16 @@ impl Render for SettingsWindow {
                                         },
                                     ))
                                 }),
-                                |this| this.disabled(),
-                            ),
+                                |this| this.opacity(0.5),
+                            )
+                            .child(self.save_btn.clone())
+                            .child("Save"),
                     ),
             )
     }
 }
+
+// ============== EMULATOR SETTINGS TAB ==============
 
 pub struct EmulatorSettingsTab {
     settings: Entity<Settings>,
@@ -525,17 +582,23 @@ impl Render for EmulatorSettingsTab {
                             .bg(darker_background),
                     )
                     .child(
-                        Button::new(
-                            Duration::from_millis(200),
-                            (element_id.clone(), "rom library browse"),
-                        )
-                        .px_2()
-                        .py(rems(0.1))
-                        .rounded_r_md()
-                        .border_1()
-                        .border_l_0()
-                        .border_color(border)
-                        .child("Browse"),
+                        div()
+                            .id((element_id.clone(), "rom library browse wrapper"))
+                            .px_2()
+                            .py(rems(0.1))
+                            .rounded_r_md()
+                            .border_1()
+                            .border_l_0()
+                            .border_color(border)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(Button::new(
+                                cx,
+                                (element_id.clone(), "rom library browse"),
+                                Duration::from_millis(200),
+                            ))
+                            .child("Browse"),
                     ),
             )
             .child(
@@ -544,7 +607,7 @@ impl Render for EmulatorSettingsTab {
                     .items_center()
                     .child("ROM Library Path")
                     .child(
-                        text_input((element_id.clone(), "rom library text input"))
+                        text_input((element_id.clone(), "rom library text input 2"))
                             .ml_2()
                             .flex()
                             .flex_1()
@@ -558,21 +621,28 @@ impl Render for EmulatorSettingsTab {
                             .bg(darker_background),
                     )
                     .child(
-                        Button::new(
-                            Duration::from_millis(200),
-                            (element_id.clone(), "rom library browse"),
-                        )
-                        .px_2()
-                        .py(rems(0.1))
-                        .rounded_r_md()
-                        .border_1()
-                        .border_l_0()
-                        .border_color(border)
-                        .child("Browse"),
+                        div()
+                            .id((element_id.clone(), "rom library browse wrapper 2"))
+                            .px_2()
+                            .py(rems(0.1))
+                            .rounded_r_md()
+                            .border_1()
+                            .border_l_0()
+                            .border_color(border)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(Button::new(
+                                cx,
+                                (element_id.clone(), "rom library browse 2"),
+                                Duration::from_millis(200),
+                            ))
+                            .child("Browse"),
                     ),
             )
     }
 }
+// ============== INPUT SETTINGS TAB ==============
 
 pub struct InputSettingsTab {
     settings: Entity<Settings>,
@@ -582,6 +652,7 @@ pub struct InputSettingsTab {
 
 impl InputSettingsTab {
     fn new(settings: Entity<Settings>, cx: &mut App) -> Entity<Self> {
+        eprintln!("Created InputSettingsTab");
         use crate::actions::*;
 
         let bind_sections = [
@@ -686,18 +757,30 @@ impl Render for InputSettingsTab {
     }
 }
 
+// ============== INPUT SECTION ==============
+
 pub struct InputSection {
     section_name: &'static str,
-    binds: Vec<(&'static str, SerializedAction)>,
+    binds: Vec<(&'static str, Entity<BindableButton<Settings>>)>,
     settings: Entity<Settings>,
 }
 impl InputSection {
-    fn new<T: AppContext>(
+    fn new(
         section_name: &'static str,
         binds: Vec<(&'static str, SerializedAction)>,
         settings: Entity<Settings>,
-        cx: &mut T,
+        cx: &mut App,
     ) -> Entity<Self> {
+        eprintln!("Created InputSection: {}", section_name);
+        let binds = binds
+            .into_iter()
+            .map(|(name, action)| {
+                let id = ElementId::from(format!("bindable_button_{}", name));
+                let button = cx.new(|cx| BindableButton::new(id, action, settings.clone(), cx));
+                (name, button)
+            })
+            .collect();
+
         cx.new(|_| Self {
             section_name,
             settings,
@@ -745,63 +828,28 @@ impl Render for InputSection {
                     .flex_col()
                     .gap_2()
                     .items_stretch()
-                    .children(chunked.iter().map(|chunk| {
+                    .children(self.binds.chunks(2).map(|chunk| {
                         div()
                             .flex()
                             .justify_between()
                             .items_baseline()
                             .gap_2()
-                            .children(chunk.iter().map(|bind| {
-                                render_bind(
-                                    bind.clone(),
-                                    settings.clone(),
-                                    element_id.clone(),
-                                    window,
-                                    cx,
-                                )
-                            }))
-                    }))
-                    .when(!leftover.is_empty(), |this| {
-                        let bind = leftover[0].clone();
-                        this.child(
-                            div()
-                                .flex()
-                                .justify_between()
-                                .items_baseline()
-                                .gap_2()
-                                .child(render_bind(
-                                    bind,
-                                    settings.clone(),
-                                    element_id.clone(),
-                                    window,
-                                    cx,
-                                ))
-                                .child(div().flex().flex_1()),
-                        )
-                    }),
+                            .children(
+                                chunk
+                                    .iter()
+                                    .map(|(name, button)| render_bind(name, button.clone(), cx)),
+                            )
+                            .when(chunk.len() == 1, |this| this.child(div().flex().flex_1()))
+                    })),
             )
     }
 }
 
-fn render_bind(
-    bind: (&'static str, SerializedAction),
-    settings: Entity<Settings>,
-    element_id: ElementId,
-    window: &mut Window,
-    cx: &mut App,
-) -> Div {
+fn render_bind(name: &'static str, button: Entity<BindableButton<Settings>>, cx: &mut App) -> Div {
     let theme = cx.global::<ThemeRegistry>().current_theme();
-    let _foreground = theme.palette.foreground();
-    let _border = theme.palette.gray();
-    let _background = theme.palette.background();
     let lighter_background = theme.palette.lighter_background();
 
     drop(theme);
-
-    let name = bind.0;
-    let bindable = window.use_keyed_state((element_id, name), cx, |_window, cx| {
-        BindableButton::new(bind.1.clone(), settings, cx)
-    });
 
     div()
         .bg(lighter_background)
@@ -814,139 +862,13 @@ fn render_bind(
                 .flex()
                 .justify_center()
                 .items_baseline()
-                .child(bind.0)
+                .child(name)
                 .flex_1(),
         )
-        .child(bindable)
+        .child(button)
 }
 
-pub struct BindableButton {
-    serialized_action: SerializedAction,
-    settings: Entity<Settings>,
-    is_binding: bool,
-    binding_timer: Option<Task<()>>,
-    focus_handle: FocusHandle,
-}
-
-impl BindableButton {
-    pub fn new(
-        serialized_action: SerializedAction,
-        settings: Entity<Settings>,
-        cx: &mut App,
-    ) -> Self {
-        Self {
-            serialized_action,
-            settings,
-            is_binding: false,
-            binding_timer: None,
-            focus_handle: cx.focus_handle(),
-        }
-    }
-}
-
-impl Render for BindableButton {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let entity_id = cx.entity_id();
-        let element_id = ElementId::from(("bindable", entity_id));
-
-        let theme = cx.global::<ThemeRegistry>().current_theme();
-        let _foreground = theme.palette.foreground();
-        let border = theme.palette.gray();
-        let _background = theme.palette.background();
-        let _lighter_background = theme.palette.lighter_background();
-
-        drop(theme);
-
-        let button_text =
-            window.use_keyed_state((element_id.clone(), "button_text"), cx, |_window, cx| {
-                self.settings
-                    .read(cx)
-                    .input
-                    .keybinds
-                    .bindings
-                    .get(&self.serialized_action.json_value())
-                    .map(|keybinds| {
-                        keybinds
-                            .iter()
-                            .map(|(keystrokes, _)| {
-                                keystrokes
-                                    .split_whitespace()
-                                    .map(|keystroke| {
-                                        Keystroke::parse(keystroke)
-                                            .unwrap()
-                                            .to_string()
-                                            .to_case(convert_case::Case::Train)
-                                    })
-                                    .join(" ")
-                            })
-                            .join(" | ")
-                    })
-                    .unwrap_or("None".into())
-            });
-
-        Button::new(Duration::from_millis(100), element_id)
-            .child(
-                div()
-                    .when_else(
-                        self.is_binding,
-                        |this| this.child("..."),
-                        |this| this.child(button_text.read(cx).clone()),
-                    )
-                    .flex()
-                    .size_full()
-                    .items_baseline()
-                    .justify_center(),
-            )
-            .rounded_sm()
-            .border_color(border)
-            .border_1()
-            .flex_1()
-            .tap_mut(|this| {
-                this.style().flex_grow = Some(0.5);
-                this.style().flex_shrink = Some(0.5);
-            })
-            .w_full()
-            .m_0p5()
-            .justify_center()
-            .items_baseline()
-            .on_click(cx.listener(using!(
-                [self.focus_handle],
-                move |this, event: &ClickEvent, window, cx| {
-                    if event.standard_click() {
-                        window.focus(&focus_handle, cx);
-
-                        this.is_binding = true;
-                        this.binding_timer = Some(cx.spawn(async move |this, cx| {
-                            cx.background_executor().timer(Duration::from_secs(3)).await;
-                            this.update(cx, |this, _cx| {
-                                this.is_binding = false;
-                            })
-                            .unwrap();
-                        }));
-                    }
-                }
-            )))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-                if this.is_binding {
-                    this.settings.update(cx, |settings, cx| {
-                        settings.input.keybinds.insert(
-                            this.serialized_action.json_value(),
-                            vec![(event.keystroke.unparse(), this.serialized_action.action())],
-                        );
-                        cx.notify();
-                    });
-                    this.binding_timer = None;
-                    this.is_binding = false;
-                    cx.notify();
-                }
-            }))
-            .on_key_up(cx.listener(|_this, _event: &KeyUpEvent, _window, _cx| {
-                // println!("{event:?}")
-            }))
-            .focusable()
-            .track_focus(&self.focus_handle)
-    }
-}
+// ============== TAB ==============
 
 pub struct Tab {
     pub name: SharedString,
@@ -976,7 +898,6 @@ impl TabBar {
         }
     }
 }
-
 impl RenderOnce for TabBar {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl gpui::IntoElement {
         let (tab_names, mut tab_content): (Vec<_>, Vec<_>) = self
@@ -1015,36 +936,44 @@ impl RenderOnce for TabBar {
                     .gap_neg_0p5()
                     .w_full()
                     .children(tab_names.into_iter().enumerate().map(|(idx, name)| {
+                        let is_current = idx == *current_tab_index.read(cx);
                         deferred(
-                            Button::new(
-                                Duration::from_millis(200),
-                                (self.id.clone(), name.clone()),
-                            )
-                            .w_full()
-                            .flex()
-                            .items_baseline()
-                            .justify_center()
-                            .px_2()
-                            .py_0p5()
-                            .border_color(border)
-                            .border_1()
-                            .rounded_t_lg()
-                            .flex_1()
-                            .child(name)
-                            .when(idx == 0, |this| this.border_l_0().rounded_tl_none())
-                            .when(idx == tab_content.len() - 1, |this| {
-                                this.border_r_0().rounded_tr_none()
-                            })
-                            .when_else(
-                                idx == *current_tab_index.read(cx),
-                                |this| this.background(background).border_b_0(),
-                                |this| this.background(darkest_background).border_b_1(),
-                            )
-                            .on_click(using!([current_tab_index], move |_event, _window, cx| {
-                                current_tab_index.write(cx, idx);
-                            }))
-                            .relative()
-                            .top_0p5(),
+                            div()
+                                .id((self.id.clone(), name.clone()))
+                                .w_full()
+                                .flex()
+                                .items_baseline()
+                                .justify_center()
+                                .px_2()
+                                .py_0p5()
+                                .border_color(border)
+                                .border_1()
+                                .rounded_t_lg()
+                                .flex_1()
+                                .when(idx == 0, |this| this.border_l_0().rounded_tl_none())
+                                .when(idx == tab_content.len() - 1, |this| {
+                                    this.border_r_0().rounded_tr_none()
+                                })
+                                .when_else(
+                                    is_current,
+                                    |this| this.bg(background).border_b_0(),
+                                    |this| this.bg(darkest_background).border_b_1(),
+                                )
+                                .cursor_pointer()
+                                .on_click(using!(
+                                    [current_tab_index],
+                                    move |_event, _window, cx| {
+                                        current_tab_index.write(cx, idx);
+                                    }
+                                ))
+                                .relative()
+                                .top_0p5()
+                                .child(Button::new(
+                                    cx,
+                                    (self.id.clone(), format!("{}-btn", name)),
+                                    Duration::from_millis(200),
+                                ))
+                                .child(name),
                         )
                     }))
                     .border_color(background)

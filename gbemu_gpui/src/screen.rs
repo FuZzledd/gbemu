@@ -67,11 +67,6 @@ impl RenderOnce for Screen {
                         bounds(origin, screen_size),
                         Arc::clone(&render_state.unwrap().screen_texture) as _,
                         size(160.into(), 144.into()),
-                        Some(if global_state.linear_filtering {
-                            SamplerType::Linear
-                        } else {
-                            SamplerType::Nearest
-                        }),
                     );
 
                     if global_state.show_fps {
