@@ -333,13 +333,24 @@ impl GameBoy {
         }
     }
 
-    pub fn load_rom(&mut self, path: impl AsRef<Path>) -> Result<(), LoadRomError> {
+    pub fn reset(&mut self, fast_boot: bool) {
         self.cpu = CPU::default();
         self.context = Context::default();
+        self.apu.reset();
+        self.ppu.reset();
+        self.counter = 0;
 
-        // self.cpu.load_debug_initial_state(&mut self.context);
-        self.context.load_boot_rom(Option::<PathBuf>::None)?;
+        if fast_boot {
+            self.cpu.load_debug_initial_state(&mut self.context);
+        }
+    }
+
+    pub fn load_rom(&mut self, path: impl AsRef<Path>) -> Result<(), LoadRomError> {
         self.context.load_rom(path)
+    }
+
+    pub fn load_boot_rom(&mut self, path: Option<impl AsRef<Path>>) -> Result<(), LoadRomError> {
+        self.context.load_boot_rom(path)
     }
 }
 

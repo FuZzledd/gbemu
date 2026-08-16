@@ -198,6 +198,7 @@ impl<T: Clone + 'static> RenderOnce for DropdownPopup<T> {
         let selected_idx = *selected_idx;
 
         div()
+            .bg(background)
             .block_mouse_except_scroll()
             .child(
                 list(
@@ -220,6 +221,7 @@ impl<T: Clone + 'static> RenderOnce for DropdownPopup<T> {
                                 cx.notify();
                             })
                         }))
+                        .px_1()
                         .w(bounds.size.width)
                         .into_any_element()
                     }),

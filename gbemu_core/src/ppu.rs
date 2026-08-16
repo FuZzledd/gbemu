@@ -499,6 +499,10 @@ impl SpriteFetcherState {
 }
 
 impl PPU {
+    pub fn reset(&mut self) {
+        *self = PPU::default();
+    }
+
     #[instrument(skip_all)]
     pub fn tick(&mut self, ctx: &mut Context<MemoryBus>) {
         match self.current_mode {

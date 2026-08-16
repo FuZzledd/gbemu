@@ -13,7 +13,7 @@ pub struct Scrollbar {
     pub max_offset: Pixels,
     pub on_drag_start: Option<Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App)>>,
     pub on_drag_end: Option<Rc<dyn Fn(&MouseUpEvent, &mut Window, &mut App)>>,
-    pub on_drag_move: Option<Box<dyn Fn(&DragMoveEvent<()>, Point<Pixels>, &mut Window, &mut App)>>,
+    pub on_drag_move: Option<Box<dyn Fn(Point<Pixels>, &mut Window, &mut App)>>,
     dragging: bool,
 }
 
@@ -43,12 +43,12 @@ impl RenderOnce for Scrollbar {
                 Bounds::default()
             });
 
-        let viewport_height = viewport_bounds.read(cx).size.height;
+        let viewport_size = viewport_bounds.read(cx).size;
 
-        let scrollbar_height = viewport_height / (self.max_offset + px(1.0)).pow(1.0 / 10.0);
+        let scrollbar_height = viewport_size.height / (self.max_offset + px(1.0)).pow(1.0 / 10.0);
 
         let scrollbar_offset =
-            -self.offset / self.max_offset * (viewport_height - px(scrollbar_height));
+            -self.offset / self.max_offset * (viewport_size.height - px(scrollbar_height));
 
         let hovered =
             window.use_keyed_state((self.id.clone(), "hovered"), cx, |_window, _cx| false);
@@ -112,13 +112,19 @@ impl RenderOnce for Scrollbar {
                             }
                         }),
                     )
-                    .on_drag_move(using!([drag_start_position], move |event, window, cx| {
-                        if let Some(handler) = &self.on_drag_move
-                            && let Some(drag_origin) = drag_start_position.read(cx)
-                        {
-                            handler(event, *drag_origin, window, cx);
+                    .on_drag_move(using!(
+                        [drag_start_position],
+                        move |event: &DragMoveEvent<()>, window, cx| {
+                            if let Some(handler) = &self.on_drag_move
+                                && let Some(&drag_origin) = drag_start_position.read(cx).as_ref()
+                            {
+                                let scroll_offset = (event.event.position - drag_origin)
+                                    .map(|coord| self.max_offset * (coord / viewport_size.height));
+
+                                handler(scroll_offset, window, cx);
+                            }
                         }
-                    }))
+                    ))
                     .on_mouse_up_out(
                         MouseButton::Left,
                         using!(
@@ -212,10 +218,9 @@ impl RenderOnce for ListScrollbar {
 
         sb.on_drag_move = Some(Box::new(using!(
             [self.list_state, initial_offset],
-            move |event, drag_origin, window, cx| {
-                if let Some(initial_scroll_offset) = initial_offset.read(cx) {
-                    let offset = event.event.position - drag_origin;
-                    list_state.set_offset_from_scrollbar(*initial_scroll_offset - offset);
+            move |drag_offset, window, cx| {
+                if let Some(&initial_scroll_offset) = initial_offset.read(cx).as_ref() {
+                    list_state.set_offset_from_scrollbar(initial_scroll_offset - drag_offset);
                 }
             }
         )));

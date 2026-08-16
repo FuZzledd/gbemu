@@ -45,6 +45,7 @@ pub mod assets;
 pub mod screen;
 pub mod theme;
 
+pub mod controller;
 pub mod debugger;
 pub mod settings;
 
@@ -63,6 +64,7 @@ struct GlobalState {
     show_fps: bool,
     fast_forward_held: bool,
     fast_forward_on: bool,
+    fast_boot: bool,
 }
 impl Global for GlobalState {}
 
@@ -358,9 +360,17 @@ fn main() -> Result<()> {
                 show_fps: false,
                 fast_forward_held: false,
                 fast_forward_on: false,
+                fast_boot: true,
             };
 
             cx.set_global(global_state);
+
+            GamepadService::run_event_loop(cx).detach();
+            cx.global_mut::<GamepadService>()
+                .bind_keys([GamepadBinding::new(
+                    [GamepadButton::Button(gilrs::Button::Start)],
+                    actions::playback::TogglePause,
+                )]);
 
             let bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
             cx.spawn(async move |cx| {
@@ -454,12 +464,7 @@ fn main() -> Result<()> {
                                     return;
                                 };
 
-                                load_rom(
-                                    &mut gameboy.lock(),
-                                    rom_path,
-                                    recent.clone(),
-                                    recent_path.clone(),
-                                );
+                                load_rom(&mut gameboy.lock(), rom_path, cx);
 
                                 cx.notify(view.entity_id());
                             }
@@ -468,12 +473,7 @@ fn main() -> Result<()> {
                         cx.on_action::<actions::file::OpenRomPath>(using!(
                             [gameboy, Arc::clone(&recent), recent_path, view],
                             move |actions::file::OpenRomPath(rom_path), cx| {
-                                load_rom(
-                                    &mut gameboy.lock(),
-                                    rom_path,
-                                    recent.clone(),
-                                    recent_path.clone(),
-                                );
+                                load_rom(&mut gameboy.lock(), rom_path, cx);
 
                                 cx.notify(view.entity_id());
                             }
@@ -496,8 +496,13 @@ fn main() -> Result<()> {
 }
 
 use crate::{
-    assets::Icons, components::menubar::MenuBar, debugger::Debugger, ext::EntityStyleExt,
-    screen::Screen, settings::SettingsWindow,
+    assets::Icons,
+    components::menubar::MenuBar,
+    controller::{GamepadBinding, GamepadButton, GamepadEventsExt, GamepadService},
+    debugger::Debugger,
+    ext::EntityStyleExt,
+    screen::Screen,
+    settings::SettingsWindow,
 };
 use crate::{components::button::Button, settings::Settings};
 use crate::{components::titlebar::TitleBar, theme::ThemeRegistry};
@@ -951,6 +956,8 @@ impl Render for MainWindow {
                         )
                     },
                 ))),
+                MenuItem::action("Fast Boot", actions::file::ToggleFastBoot)
+                    .checked(cx.global::<GlobalState>().fast_boot),
                 MenuItem::separator(),
                 MenuItem::action("Exit", actions::file::Exit),
             ]),
@@ -1038,6 +1045,7 @@ impl Render for MainWindow {
         drop(theme);
 
         div()
+            .id(ElementId::View(self_entity_id.clone()))
             .bg(background)
             .track_focus(&self.focus_handle)
             .flex()
@@ -1162,6 +1170,9 @@ impl Render for MainWindow {
                     }
                 })
             ))
+            .on_gamepad_event(cx, window, |event, window, cx| {
+                //println!("{:?}", event);
+            })
             .on_drop(|paths: &ExternalPaths, window, cx| {
                 let paths = paths.paths();
                 if let Some(path) = paths.first() {
@@ -1178,12 +1189,11 @@ impl Render for MainWindow {
                 #[cfg(debug_assertions)]
                 window.toggle_inspector(cx);
             })
-            .on_action::<actions::video::ToggleScaleFactor>(using!(
-                [],
-                move |action, _window, cx| {
+            .on_action(cx.listener(
+                move |_this, action: &actions::video::ToggleScaleFactor, _window, cx| {
                     cx.global_mut::<GlobalState>().scale_factor = action.0;
-                    cx.notify(self_entity_id);
-                }
+                    cx.notify();
+                },
             ))
             .on_action::<actions::video::ToggleFullscreen>(|_event, window, _cx| {
                 window.toggle_fullscreen();
@@ -1191,6 +1201,13 @@ impl Render for MainWindow {
             .on_action::<actions::file::Exit>(|_event, window, _cx| {
                 window.remove_window();
             })
+            .on_action(cx.listener(
+                |_this, _action: &actions::file::ToggleFastBoot, _window, cx| {
+                    let global_state = cx.global_mut::<GlobalState>();
+                    global_state.fast_boot = !global_state.fast_boot;
+                    cx.notify();
+                },
+            ))
             .on_action::<actions::playback::TogglePause>(|_event, _window, _cx| {
                 PLAYING.fetch_not(Ordering::Relaxed);
             })
@@ -1260,13 +1277,12 @@ impl Render for MainWindow {
     }
 }
 
-fn load_rom(
-    gameboy: &mut GameBoy,
-    rom_path: impl AsRef<std::path::Path>,
-    recent: Arc<RwLock<IndexSet<PathBuf>>>,
-    recent_path: impl AsRef<std::path::Path>,
-) {
+fn load_rom(gameboy: &mut GameBoy, rom_path: impl AsRef<std::path::Path>, cx: &mut App) {
     let rom_path = rom_path.as_ref();
+    let recent = cx.global::<RecentFiles>();
+    let strategy = cx.global::<EtceteraStrategy>();
+    let recent_path = strategy.in_data_dir("recent.json");
+
     {
         let mut recent = recent.write();
         recent.shift_insert(0, rom_path.to_path_buf());
@@ -1285,6 +1301,26 @@ fn load_rom(
         .write_all(&serde_json::to_vec(&recent.read().as_slice()).unwrap())
         .unwrap();
     recent_writer.flush().unwrap();
+
+    let fast_boot = cx.global::<GlobalState>().fast_boot;
+
+    let settings = cx.global::<Settings>();
+
+    gameboy.reset(fast_boot);
+
+    if !fast_boot {
+        let Ok(_) = gameboy.load_boot_rom(settings.emulator.bootrom_path.as_ref()) else {
+            rfd::MessageDialog::new()
+                .set_title("Failed to load boot ROM")
+                .set_buttons(MessageButtons::Ok)
+                .set_level(MessageLevel::Error)
+                .set_description("Couldn't load selected boot ROM. It may be missing or moved.")
+                .show();
+
+            return;
+        };
+    }
+
     let Ok(_) = gameboy.load_rom(rom_path) else {
         rfd::MessageDialog::new()
             .set_title("Failed to load rom")

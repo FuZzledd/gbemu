@@ -93,6 +93,16 @@ pub struct APU {
 }
 
 impl APU {
+    pub fn reset(&mut self) {
+        *self = APU {
+            debug_sender: self.debug_sender.clone(),
+            buffer_channel: self.buffer_channel.clone(),
+            output_channel: self.output_channel.clone(),
+            clocks_needed: self.clocks_needed,
+            ..Default::default()
+        }
+    }
+
     pub fn create_support(&mut self, _ctx: &mut Context<MemoryBus>) -> APUSupport {
         let support = APUSupport {
             output_channel: self.output_channel.0.clone(),
@@ -166,7 +176,12 @@ impl APU {
         self.clocks = (self.clocks + 1) % (self.clocks_needed * CLOCK_DIVISOR as u32);
 
         if self.clocks == 0 {
-            self.buffer_channel.0.send(self.buffer.clone()).unwrap();
+            if let Err(err) = self.buffer_channel.0.try_send(self.buffer.clone()) {
+                match err {
+                    channel::TrySendError::Disconnected(_) => panic!("Channel disconnected"),
+                    _ => {}
+                }
+            }
             self.buffer.clear();
         }
     }

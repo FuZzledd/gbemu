@@ -150,8 +150,9 @@ pub struct EmulatorSettings {
     #[default("Catppuccin Frappe".into())]
     pub theme: Cow<'static, str>,
     pub library_path: PathBuf,
-    pub bootrom_path: PathBuf,
-    pub use_bootrom: bool,
+    pub bootrom_path: Option<PathBuf>,
+    #[default(true)]
+    pub fast_boot: bool,
 }
 
 pub trait SerializableAction: Action {

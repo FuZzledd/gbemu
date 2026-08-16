@@ -36,3 +36,5 @@ rom_16Mb.gb
 rom_32Mb.gb
 rom_64Mb.gb
 
+**/.cargo/override.toml
+

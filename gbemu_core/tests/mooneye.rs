@@ -18,6 +18,7 @@ fn test_emulator_only(path: &Utf8Path, rom: Vec<u8>) -> datatest_stable::Result<
 
 fn test_acceptance(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()> {
     let mut gameboy: GameBoy = GameBoy::default();
+    gameboy.reset(true);
     gameboy.load_rom(path).unwrap();
 
     let status = loop {
@@ -54,7 +55,7 @@ fn test_acceptance(path: &Utf8Path, _rom: Vec<u8>) -> datatest_stable::Result<()
 
     for _ in 0..4 {
         loop {
-            let redraw = gameboy.tick(false).should_redraw();
+            let redraw = gameboy.tick(true).should_redraw();
             if redraw {
                 break;
             }

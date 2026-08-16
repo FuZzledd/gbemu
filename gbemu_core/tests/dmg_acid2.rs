@@ -11,6 +11,7 @@ mod common;
 
 fn test_dmg_acid2() {
     let mut gameboy: GameBoy = GameBoy::default();
+    gameboy.reset(true);
 
     let palette = Palette::default().tap_mut(|palette| {
         use ppu::Pixel::*;
