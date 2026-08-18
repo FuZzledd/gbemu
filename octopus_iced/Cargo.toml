@@ -1,0 +1,22 @@
+[package]
+name = "octopus_iced"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+array-deque = { workspace = true }
+better_default = { workspace = true }
+iced = { workspace = true, features = ["advanced", "canvas", "image", "wgpu", "lazy", "tokio"] }
+iced_renderer = { workspace = true, features = ["iced_wgpu", "image", "wgpu"] }
+itertools = { workspace = true }
+parking_lot = { workspace = true }
+rfd = { workspace = true }
+rodio = { workspace = true, features = ["64bit", "wav_output"] }
+spin_sleep = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tap = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+tracing-flame = { workspace = true }
+octopus_core = { workspace = true }
+crossbeam = { workspace = true }

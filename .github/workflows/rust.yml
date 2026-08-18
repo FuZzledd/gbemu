@@ -26,9 +26,9 @@ jobs:
         tool: nextest
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build -p gbemu_core --verbose
+      run: cargo build -p octopus_core --verbose
     - name: Run tests
-      run: cargo nextest run -p gbemu_core --verbose --profile ci
+      run: cargo nextest run -p octopus_core --verbose --profile ci
       continue-on-error: true
     - name: Display test summary
       uses: test-summary/action@v2
@@ -50,12 +50,12 @@ jobs:
         apt: libfontconfig-dev libpipewire-0.3-dev libjack-jackd2-dev libpulse-dev qt6-base-dev libasound2-dev
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build -p gbemu_slint --verbose --release
+      run: cargo build -p octopus_gpui --verbose --release
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v7.0.1
       with:
-        name: gbemu
-        path: ./target/release/gbemu_slint
+        name: octopus
+        path: ./target/release/octopus_gpui
     
       
       

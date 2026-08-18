@@ -1,4 +1,4 @@
-# gbemu (better name TBD)
+# octopus (better name TBD)
 
 This is a very WIP Game Boy emulator, with an Slint frontend
 
