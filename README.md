@@ -2,7 +2,9 @@
 
 A Game Boy emulator written in pure Rust, with a GPUI frontend
 
-<img src="octopus-gb.svg" width=100>
+<p align="center">
+  <img src="octopus-gb.svg" width=200/>
+</p>
 
 ## Features
 - Reasonably accurate CPU
@@ -15,8 +17,10 @@ A Game Boy emulator written in pure Rust, with a GPUI frontend
 - Dog
 - 100% human grown slop
 
-<img src="screenie1.png" alt="A screenshot of Link's Awakening running" width=400>
-<img src="screenie2.png" alt="A screenshot of Pokemon Red running" width=400>
+<span>
+  <img src="screenie1.png" alt="A screenshot of Link's Awakening running" width=300/>
+  <img src="screenie2.png" alt="A screenshot of Pokemon Red running" width=300/>
+</span>
 
 # Building
 Requires Rust Nightly.
