@@ -50,7 +50,7 @@ jobs:
         apt: libfontconfig-dev libpipewire-0.3-dev libjack-jackd2-dev libpulse-dev qt6-base-dev libasound2-dev
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build -p octopus_gpui --verbose --release
+      run: cargo build -p octopus_gpui --release
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v7.0.1
       with:
