@@ -28,14 +28,10 @@ dioxus-devtools.workspace = true
 docstr.workspace = true
 etcetera = { workspace = true }
 flume.workspace = true
-octopus_common = { workspace = true }
-octopus_core = { workspace = true }
 gilrs = { workspace = true, features = ["serde-serialize"] }
 gpui = { workspace = true, features = ["font-kit", "wayland", "x11"] }
 gpui_elements.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "wgpu", "x11"] }
-# gpui-component = { workspace = true }
-# gpui-component-assets.workspace = true
 image.workspace = true
 image24 = { package = "image", version = "0.24.9" }
 include_dir = { workspace = true, features = ["glob"] }
@@ -44,6 +40,8 @@ itertools = { workspace = true }
 jiff.workspace = true
 light-file-dialog.workspace = true
 num-traits.workspace = true
+octopus_common = { workspace = true }
+octopus_core = { workspace = true }
 palette = { workspace = true, features = ["named"] }
 parking_lot = { workspace = true }
 png.workspace = true
@@ -74,8 +72,8 @@ wgpu = "29.0.3"
 
 [build-dependencies]
 databake = { workspace = true }
-octopus_common = { workspace = true }
 glob.workspace = true
+octopus_common = { workspace = true }
 serde = { workspace = true }
 vergen-gix = { workspace = true }
 yaml_serde.workspace = true

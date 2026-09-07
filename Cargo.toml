@@ -32,8 +32,6 @@ dioxus-devtools = "0.7.9"
 docstr = "0.4.10"
 etcetera = "0.11.0"
 flume = { version = "0.12.0" }
-octopus_common = { path = "octopus_common" }
-octopus_core = { path = "octopus_core" }
 gilrs = { version = "0.11.2" }
 glob = "0.3.3"
 gpui = { package = "gpui-ce", git = "https://github.com/FuZzledd/gpui-ce", version = "*" }
@@ -43,9 +41,6 @@ gpui_platform = {
   git = "https://github.com/FuZzledd/gpui-ce",
   version = "*",
 }
-# gpui = { path = "/home/zuzi/gpui-ce/crates/gpui" }
-# gpui_elements = { path = "/home/zuzi/gpui-ce/crates/gpui_elements" }
-# gpui_platform = { path = "/home/zuzi/gpui-ce/crates/gpui_platform/" }
 image = "0.25.6"
 include_dir = "0.7.4"  # slint = {#   git = "https://github.com/slint-ui/slint",#   branch = "pre-release/1.17"# }# slint-build = {#   git = "https://github.com/slint-ui/slint",#   branch = "pre-release/1.17"# }
 indexmap = "2.14.0"
@@ -56,6 +51,8 @@ light-file-dialog = "3.21.3"
 log = "0.4.32"
 nom = "8.0.0"
 num-traits = "0.2.19"
+octopus_common = { path = "octopus_common" }
+octopus_core = { path = "octopus_core" }
 palette = "0.7.6"
 parking_lot = "0.12.5"
 paste = "1.0.15"
