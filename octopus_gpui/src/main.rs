@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 pub mod actions;
 pub mod components;
 
@@ -24,11 +26,11 @@ use cpal::{
 };
 use dasp::Signal;
 use etcetera::{AppStrategy, AppStrategyArgs};
-use octopus_core::{GameBoy, PLAYBACK_CONTROLLER, PLAYING, Palette, PlaybackMessage, TickStatus};
 use gpui::prelude::*;
 use gpui::*;
 use gpui_elements::editable_text::{self, actions::DEFAULT_INPUT_CONTEXT};
 use indexmap::IndexSet;
+use octopus_core::{GameBoy, PLAYBACK_CONTROLLER, PLAYING, Palette, PlaybackMessage, TickStatus};
 use parking_lot::{Mutex, RwLock};
 use png_achunk::{Chunk, ChunkType};
 use rfd::{MessageButtons, MessageLevel};
@@ -40,11 +42,7 @@ use spire_enum::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::ops::{Deref, DerefMut};
-use std::{
-    cell::Cell,
-    io::Cursor,
-    sync::Arc,
-};
+use std::{cell::Cell, io::Cursor, sync::Arc};
 use std::{
     env, fs,
     io::{BufWriter, Write},
@@ -461,9 +459,7 @@ use crate::{
     about::AboutWindow,
     assets::Assets,
     components::menubar::MenuBar,
-    controller::{
-        GamepadEventsExt, GamepadService,
-    },
+    controller::{GamepadEventsExt, GamepadService},
     debugger::Debugger,
     ext::EntityStyleExt,
     luna::LunaWindow,
@@ -1101,9 +1097,10 @@ impl Render for MainWindow {
 
                                 this.gameboy.lock().set_joypad_state(button, false);
                             } else if name.starts_with("playback")
-                                && name == "playback::FastForward" {
-                                    cx.global_mut::<GlobalState>().fast_forward_held = true;
-                                }
+                                && name == "playback::FastForward"
+                            {
+                                cx.global_mut::<GlobalState>().fast_forward_held = true;
+                            }
                         }
                     }
                 })
@@ -1137,13 +1134,12 @@ impl Render for MainWindow {
                             };
 
                             this.gameboy.lock().set_joypad_state(button, true);
-                        } else if name.starts_with("playback")
-                            && name == "playback::FastForward" {
-                                cx.global_mut::<GlobalState>().fast_forward_held = false;
-                                this.audio_controller_sender
-                                    .send(AudioControllerMessage::ClearBuffer)
-                                    .unwrap();
-                            }
+                        } else if name.starts_with("playback") && name == "playback::FastForward" {
+                            cx.global_mut::<GlobalState>().fast_forward_held = false;
+                            this.audio_controller_sender
+                                .send(AudioControllerMessage::ClearBuffer)
+                                .unwrap();
+                        }
                     }
                 })
             ))
@@ -1187,9 +1183,10 @@ impl Render for MainWindow {
                                         this.gameboy.lock().set_joypad_state(button, false);
                                         break;
                                     } else if name.starts_with("playback")
-                                        && name == "playback::FastForward" {
-                                            cx.global_mut::<GlobalState>().fast_forward_held = true;
-                                        }
+                                        && name == "playback::FastForward"
+                                    {
+                                        cx.global_mut::<GlobalState>().fast_forward_held = true;
+                                    }
                                 }
                             }
                         })
@@ -1233,10 +1230,10 @@ impl Render for MainWindow {
                                         this.gameboy.lock().set_joypad_state(button, true);
                                         break;
                                     } else if name.starts_with("playback")
-                                        && name == "playback::FastForward" {
-                                            cx.global_mut::<GlobalState>().fast_forward_held =
-                                                false;
-                                        }
+                                        && name == "playback::FastForward"
+                                    {
+                                        cx.global_mut::<GlobalState>().fast_forward_held = false;
+                                    }
                                 }
                             }
                         })
@@ -1354,57 +1351,60 @@ impl Render for MainWindow {
                     });
                 },
             ))
-            .on_action::<actions::tools::EmbedRomInPng>(cx.listener(|_this, _event, _window, cx| {
-                let mut library_path = cx.global::<Settings>().emulator.library_path.clone();
+            .on_action::<actions::tools::EmbedRomInPng>(cx.listener(
+                |_this, _event, _window, cx| {
+                    let mut library_path = cx.global::<Settings>().emulator.library_path.clone();
 
-                if !library_path.is_dir() {
-                    library_path = env::current_dir()
-                        .unwrap_or_else(|_| env::home_dir().unwrap_or_else(|| PathBuf::from("/")));
-                }
+                    if !library_path.is_dir() {
+                        library_path = env::current_dir().unwrap_or_else(|_| {
+                            env::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+                        });
+                    }
 
-                let Some(source_image_path) = rfd::FileDialog::new()
-                    .set_title("Select source image")
-                    .add_filter("Images (.png)", &["png"])
-                    .pick_file()
-                else {
-                    return;
-                };
+                    let Some(source_image_path) = rfd::FileDialog::new()
+                        .set_title("Select source image")
+                        .add_filter("Images (.png)", &["png"])
+                        .pick_file()
+                    else {
+                        return;
+                    };
 
-                let (image, chunks) = png_achunk::Decoder::from_file(source_image_path)
-                    .map(|mut decoder| decoder.decode_all().expect("Couldn't load image"))
-                    .expect("Couldn't load image");
+                    let (image, chunks) = png_achunk::Decoder::from_file(source_image_path)
+                        .map(|mut decoder| decoder.decode_all().expect("Couldn't load image"))
+                        .expect("Couldn't load image");
 
-                let Some(source_rom_path) = rfd::FileDialog::new()
-                    .add_filter("Game Boy ROMs (.gb/.gbc)", &["gb", "gbc"])
-                    .set_directory(library_path)
-                    .set_title("Select source ROM")
-                    .pick_file()
-                else {
-                    return;
-                };
-                let rom = fs::read(source_rom_path).expect("Couldn't load ROM");
+                    let Some(source_rom_path) = rfd::FileDialog::new()
+                        .add_filter("Game Boy ROMs (.gb/.gbc)", &["gb", "gbc"])
+                        .set_directory(library_path)
+                        .set_title("Select source ROM")
+                        .pick_file()
+                    else {
+                        return;
+                    };
+                    let rom = fs::read(source_rom_path).expect("Couldn't load ROM");
 
-                let Some(save_path) = rfd::FileDialog::new()
-                    .add_filter("Destination image (.png)", &["png"])
-                    .save_file()
-                else {
-                    return;
-                };
+                    let Some(save_path) = rfd::FileDialog::new()
+                        .add_filter("Destination image (.png)", &["png"])
+                        .save_file()
+                    else {
+                        return;
+                    };
 
-                let mut encoder = png_achunk::Encoder::new_to_file(save_path)
-                    .expect("Couldn't create new file")
-                    .with_custom_chunk(
-                        Chunk::new(ChunkType::from_ascii(&"gbRM").unwrap(), rom).unwrap(),
-                    );
+                    let mut encoder = png_achunk::Encoder::new_to_file(save_path)
+                        .expect("Couldn't create new file")
+                        .with_custom_chunk(
+                            Chunk::new(ChunkType::from_ascii(&"gbRM").unwrap(), rom).unwrap(),
+                        );
 
-                for chunk in chunks {
-                    encoder = encoder.with_custom_chunk(chunk);
-                }
+                    for chunk in chunks {
+                        encoder = encoder.with_custom_chunk(chunk);
+                    }
 
-                image
-                    .write_with_encoder(encoder)
-                    .expect("Couldn't write image file");
-            }))
+                    image
+                        .write_with_encoder(encoder)
+                        .expect("Couldn't write image file");
+                },
+            ))
             .on_action::<actions::tools::ToggleDebugger>(cx.listener(
                 |_this, _event, window, cx| {
                     if let Some(window_handle) =
