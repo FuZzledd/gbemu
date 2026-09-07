@@ -177,10 +177,7 @@ impl APU {
 
         if self.clocks == 0 {
             if let Err(err) = self.buffer_channel.0.try_send(self.buffer.clone()) {
-                match err {
-                    channel::TrySendError::Disconnected(_) => panic!("Channel disconnected"),
-                    _ => {}
-                }
+                if let channel::TrySendError::Disconnected(_) = err { panic!("Channel disconnected") }
             }
             self.buffer.clear();
         }

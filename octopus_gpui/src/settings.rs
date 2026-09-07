@@ -1,11 +1,9 @@
 use crate::{
-    APP, WindowMap, WindowType,
-    components::{button, scrollbar::ListScrollbar},
+    WindowMap, WindowType,
     controller::{
         AxisSign, GamepadBinding, GamepadButton, GamepadButtonCombination, GamepadEventsExt,
         GamepadService, SignedAxis, UnsignedAxis,
     },
-    ext::ElementBoundsExt,
 };
 use crate::{EtceteraStrategy, components::titlebar::TitleBar};
 use crate::{
@@ -14,7 +12,7 @@ use crate::{
         button::Button,
         dropdown::Dropdown,
         root::CloseRequestEvent,
-        scrollbar::{DivScrollbar, Scrollbar},
+        scrollbar::DivScrollbar,
     },
 };
 use crate::{
@@ -25,7 +23,6 @@ use crate::{reload_settings, theme::ThemeRegistry};
 use better_default::Default;
 use convert_case::Casing;
 use core::any::{Any, TypeId};
-use derive_more::Display;
 use etcetera::AppStrategy;
 use octopus_common::theme::{Color, Theme};
 use octopus_core::Palette;
@@ -33,7 +30,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_elements::editable_text::{EditableTextState, StringStorage, TextChanged, text_input};
 use itertools::Itertools;
-use palette::{Srgba, rgb::Rgba};
+use palette::Srgba;
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -549,7 +546,7 @@ impl Render for SettingsWindow {
         let lighter_background = theme.palette.lighter_background();
         let darker_background = theme.palette.darker_background();
         let _darkest_background = theme.palette.darkest_background();
-        let background = theme.palette.background();
+        let _background = theme.palette.background();
         let _dark_foreground = theme.palette.dark_foreground();
         let _foreground = theme.palette.foreground();
         let lighter_blue = theme.palette.blue();
@@ -566,7 +563,7 @@ impl Render for SettingsWindow {
         let _settings_observer = window.use_keyed_state(
             (element_id.clone(), "settings_observer"),
             cx,
-            |window, cx| {
+            |_window, cx| {
                 cx.observe(
                     &self.settings,
                     using!([unsaved_changes], move |_this, settings, cx| {
@@ -700,7 +697,9 @@ impl VideoSettingsTab {
             )
         });
 
-        let elem = cx.new(|cx| {
+        
+
+        cx.new(|cx| {
             let elem = Self {
                 palette_dropdown: cx.new(|cx| {
                     Dropdown::new_raw(options, cx).tap_mut(|this| {
@@ -730,14 +729,12 @@ impl VideoSettingsTab {
             .detach();
 
             elem
-        });
-
-        elem
+        })
     }
 }
 
 impl Render for VideoSettingsTab {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let element_id = ElementId::from(("VideoSettings", cx.entity_id()));
 
         let theme = cx.global::<ThemeRegistry>().current_theme();
@@ -783,7 +780,7 @@ impl Render for VideoSettingsTab {
                                             Duration::from_millis(100),
                                             (element_id.clone(), format!("palette button {idx}")),
                                         )
-                                        .on_click(cx.listener(move |this, event, window, cx| {
+                                        .on_click(cx.listener(move |this, _event, _window, cx| {
                                             let (r, g, b, _) = Srgba::from(color)
                                                 .into_format::<_, u8>()
                                                 .into_components();
@@ -878,7 +875,7 @@ impl Render for VideoSettingsTab {
                                 )
                                 .on_checked(cx.listener(using!(
                                     [self.settings],
-                                    move |this, &checked, window, cx| {
+                                    move |_this, &checked, _window, cx| {
                                         settings.update(cx, |settings, cx| {
                                             settings.video.filtering = checked;
                                             cx.notify();
@@ -904,7 +901,7 @@ impl Render for VideoSettingsTab {
                                 )
                                 .on_checked(cx.listener(using!(
                                     [self.settings],
-                                    move |this, &checked, window, cx| {
+                                    move |_this, &checked, _window, cx| {
                                         settings.update(cx, |settings, cx| {
                                             settings.video.fit_window = checked;
                                             cx.notify();
@@ -930,7 +927,7 @@ impl Render for VideoSettingsTab {
                                 )
                                 .on_checked(cx.listener(using!(
                                     [self.settings],
-                                    move |this, &checked, window, cx| {
+                                    move |_this, &checked, _window, cx| {
                                         settings.update(cx, |settings, cx| {
                                             settings.video.integer_scaling = checked;
                                             cx.notify();
@@ -953,7 +950,7 @@ impl Render for VideoSettingsTab {
                                 Checkbox::new(settings.show_fps, (element_id.clone(), "show_fps"))
                                     .on_checked(cx.listener(using!(
                                         [self.settings],
-                                        move |this, &checked, window, cx| {
+                                        move |_this, &checked, _window, cx| {
                                             settings.update(cx, |settings, cx| {
                                                 settings.video.show_fps = checked;
                                                 cx.notify();
@@ -981,7 +978,7 @@ impl Render for VideoSettingsTab {
                         )
                         .on_checked(cx.listener(using!(
                             [self.settings],
-                            move |this, &_checked, window, cx| {
+                            move |_this, &_checked, _window, cx| {
                                 settings.update(cx, |settings, cx| {
                                     settings.video.scale = scale;
                                     cx.notify();
@@ -1005,7 +1002,9 @@ impl EmulatorSettingsTab {
     pub fn new(settings: Entity<Settings>, cx: &mut App) -> Entity<Self> {
         let options = cx.global::<ThemeRegistry>().themes().clone();
 
-        let elem = cx.new(|cx| {
+        
+
+        cx.new(|cx| {
             let elem = Self {
                 library_path_state: cx.new(|cx| {
                     EditableTextState::new(
@@ -1081,14 +1080,12 @@ impl EmulatorSettingsTab {
             .detach();
 
             elem
-        });
-
-        elem
+        })
     }
 }
 
 impl Render for EmulatorSettingsTab {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity_id = cx.entity_id();
         let element_id = ElementId::from(("emulator_settings", entity_id));
 
@@ -1153,7 +1150,7 @@ impl Render for EmulatorSettingsTab {
                                         this.library_path_state.update(cx, |path, cx| {
                                             path.emplace(&result.to_string_lossy(), cx)
                                         });
-                                        this.settings.update(cx, |this, cx| {
+                                        this.settings.update(cx, |this, _cx| {
                                             this.emulator.library_path = result;
                                         })
                                     }
@@ -1219,7 +1216,7 @@ impl Render for EmulatorSettingsTab {
                                         this.bootrom_path_state.update(cx, |path, cx| {
                                             path.emplace(&result.to_string_lossy(), cx)
                                         });
-                                        this.settings.update(cx, |this, cx| {
+                                        this.settings.update(cx, |this, _cx| {
                                             this.emulator.bootrom_path = if result.is_empty() {
                                                 None
                                             } else {
@@ -1245,7 +1242,7 @@ impl Render for EmulatorSettingsTab {
                         )
                         .on_checked(cx.listener(using!(
                             [self.settings],
-                            move |this, &checked, window, cx| {
+                            move |_this, &checked, _window, cx| {
                                 settings.update(cx, |settings, cx| {
                                     settings.emulator.fast_boot = checked;
                                     cx.notify();
@@ -1346,10 +1343,7 @@ impl Render for InputSettingsTab {
                     .child(
                         div()
                             .w_full()
-                            .children(self.bind_sections.iter().cloned().map(|bind_section| {
-                                // bind_section.cached(InputSection::base_style())
-                                bind_section
-                            }))
+                            .children(self.bind_sections.iter().cloned())
                             .p_2()
                             .text_color(foreground)
                             .flex()
@@ -1376,7 +1370,7 @@ impl InputSection {
         gamepad: bool,
         cx: &mut T,
     ) -> Entity<Self> {
-        cx.new(|cx| Self {
+        cx.new(|_cx| Self {
             section_name,
             settings,
             binds,
@@ -1480,7 +1474,7 @@ impl Tooltip {
 }
 
 impl Render for Tooltip {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.global::<ThemeRegistry>().current_theme();
         let background = theme.palette.background();
         let foreground = theme.palette.foreground();
@@ -1539,7 +1533,7 @@ fn render_bind(
     let tooltip = ACTION_TOOLTIPS
         .get(&bind.1.action().as_any().type_id())
         .map(|tooltip| {
-            window.use_keyed_state((element_id.clone(), "tooltip"), cx, |window, cx| {
+            window.use_keyed_state((element_id.clone(), "tooltip"), cx, |_window, _cx| {
                 Tooltip::new(tooltip.clone())
             })
         });
@@ -1589,7 +1583,7 @@ impl BindableButton {
             just_bound: false,
             binding_timer: None,
             focus_handle: cx.focus_handle(),
-            resolved_style: cx.new(|cx| StyleRefinement::default()),
+            resolved_style: cx.new(|_cx| StyleRefinement::default()),
         }
     }
 }
@@ -1690,7 +1684,7 @@ impl Render for BindableButton {
             )))
             .on_aux_click(cx.listener(using!(
                 [self.focus_handle, button_text],
-                move |this, event: &ClickEvent, window, cx| {
+                move |this, event: &ClickEvent, _window, cx| {
                     if event.is_right_click() {
                         this.is_binding = false;
                         this.binding_timer = None;
@@ -1707,7 +1701,7 @@ impl Render for BindableButton {
             )))
             .on_key_down(cx.listener(using!(
                 [button_text],
-                move |this, event: &KeyDownEvent, window, cx| {
+                move |this, event: &KeyDownEvent, _window, cx| {
                     if this.is_binding {
                         this.settings.update(cx, |settings, cx| {
                             settings.input.keybinds.insert(
@@ -1756,7 +1750,7 @@ impl GamepadBindableButton {
             just_bound: false,
             binding_timer: None,
             focus_handle: cx.focus_handle(),
-            resolved_style: cx.new(|cx| StyleRefinement::default()),
+            resolved_style: cx.new(|_cx| StyleRefinement::default()),
             held_buttons: BTreeSet::default(),
         }
     }
@@ -1849,7 +1843,7 @@ impl Render for GamepadBindableButton {
             )))
             .on_aux_click(cx.listener(using!(
                 [self.focus_handle, button_text],
-                move |this, event: &ClickEvent, window, cx| {
+                move |this, event: &ClickEvent, _window, cx| {
                     if event.is_right_click() {
                         this.is_binding = false;
                         this.binding_timer = None;
@@ -1868,12 +1862,12 @@ impl Render for GamepadBindableButton {
                 cx,
                 window,
                 using!([weak_self], move |button,
-                                          event,
-                                          gamepad_service,
-                                          window,
+                                          _event,
+                                          _gamepad_service,
+                                          _window,
                                           cx| {
                     weak_self
-                        .update(cx, |this, cx| {
+                        .update(cx, |this, _cx| {
                             this.held_buttons.insert(*button);
                         })
                         .ok();
@@ -1884,7 +1878,7 @@ impl Render for GamepadBindableButton {
                 window,
                 using!(
                     [button_text, weak_self],
-                    move |button, event, gamepad_service, window, cx| {
+                    move |button, _event, _gamepad_service, _window, cx| {
                         weak_self
                             .update(cx, |this, cx| {
                                 if this.is_binding {

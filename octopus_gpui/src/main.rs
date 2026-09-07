@@ -36,14 +36,13 @@ use ringbuf::{
     storage::Heap,
     traits::{Consumer, Observer, Producer},
 };
-use serde::Serialize;
 use spire_enum::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::ops::{Deref, DerefMut};
 use std::{
     cell::Cell,
-    io::{BufReader, Cursor},
+    io::Cursor,
     sync::Arc,
 };
 use std::{
@@ -215,7 +214,7 @@ fn main() -> Result<()> {
                         ..Default::default()
                     },
                     |window, cx| {
-                        cx.update_global::<GlobalState, _>(|global, cx| {
+                        cx.update_global::<GlobalState, _>(|global, _cx| {
                             global.fixed_size = !settings.video.fit_window;
                             global.show_fps = settings.video.show_fps;
                             global.integer_scaling = settings.video.integer_scaling;
@@ -463,8 +462,7 @@ use crate::{
     assets::Assets,
     components::menubar::MenuBar,
     controller::{
-        AxisSign, GamepadBinding, GamepadButton, GamepadEventsExt, GamepadService, SignedAxis,
-        UnsignedAxis,
+        GamepadEventsExt, GamepadService,
     },
     debugger::Debugger,
     ext::EntityStyleExt,
@@ -1010,7 +1008,7 @@ impl Render for MainWindow {
 
         let menu_bar = self.menu_bar.clone();
 
-        menu_bar.update_style(cx, |style, cx| {
+        menu_bar.update_style(cx, |style, _cx| {
             *style = if window.is_fullscreen() {
                 style.clone().opacity(0.0)
             } else {
@@ -1026,7 +1024,7 @@ impl Render for MainWindow {
         let weak_self = cx.weak_entity();
 
         div()
-            .id(ElementId::View(self_entity_id.clone()))
+            .id(ElementId::View(self_entity_id))
             .bg(background)
             .track_focus(&self.focus_handle)
             .flex()
@@ -1102,11 +1100,10 @@ impl Render for MainWindow {
                                 };
 
                                 this.gameboy.lock().set_joypad_state(button, false);
-                            } else if name.starts_with("playback") {
-                                if name == "playback::FastForward" {
+                            } else if name.starts_with("playback")
+                                && name == "playback::FastForward" {
                                     cx.global_mut::<GlobalState>().fast_forward_held = true;
                                 }
-                            }
                         }
                     }
                 })
@@ -1140,18 +1137,17 @@ impl Render for MainWindow {
                             };
 
                             this.gameboy.lock().set_joypad_state(button, true);
-                        } else if name.starts_with("playback") {
-                            if name == "playback::FastForward" {
+                        } else if name.starts_with("playback")
+                            && name == "playback::FastForward" {
                                 cx.global_mut::<GlobalState>().fast_forward_held = false;
                                 this.audio_controller_sender
                                     .send(AudioControllerMessage::ClearBuffer)
                                     .unwrap();
                             }
-                        }
                     }
                 })
             ))
-            .on_gamepad_event(cx, window, |event, gamepad_service, window, cx| {
+            .on_gamepad_event(cx, window, |_event, _gamepad_service, _window, _cx| {
                 //println!("{:?}", event);
             })
             .on_gamepad_press(
@@ -1160,7 +1156,7 @@ impl Render for MainWindow {
                 using!([weak_self], move |button,
                                           event,
                                           gamepad_service,
-                                          window,
+                                          _window,
                                           cx| {
                     weak_self
                         .update(cx, |this: &mut MainWindow, cx| {
@@ -1190,11 +1186,10 @@ impl Render for MainWindow {
 
                                         this.gameboy.lock().set_joypad_state(button, false);
                                         break;
-                                    } else if name.starts_with("playback") {
-                                        if name == "playback::FastForward" {
+                                    } else if name.starts_with("playback")
+                                        && name == "playback::FastForward" {
                                             cx.global_mut::<GlobalState>().fast_forward_held = true;
                                         }
-                                    }
                                 }
                             }
                         })
@@ -1207,7 +1202,7 @@ impl Render for MainWindow {
                 using!([weak_self], move |button,
                                           event,
                                           gamepad_service,
-                                          window,
+                                          _window,
                                           cx| {
                     weak_self
                         .update(cx, |this: &mut MainWindow, cx| {
@@ -1237,12 +1232,11 @@ impl Render for MainWindow {
 
                                         this.gameboy.lock().set_joypad_state(button, true);
                                         break;
-                                    } else if name.starts_with("playback") {
-                                        if name == "playback::FastForward" {
+                                    } else if name.starts_with("playback")
+                                        && name == "playback::FastForward" {
                                             cx.global_mut::<GlobalState>().fast_forward_held =
                                                 false;
                                         }
-                                    }
                                 }
                             }
                         })
@@ -1261,7 +1255,7 @@ impl Render for MainWindow {
                 }
                 false
             })
-            .on_action::<actions::file::OpenRom>(cx.listener(move |this, _a, window, cx| {
+            .on_action::<actions::file::OpenRom>(cx.listener(move |this, _a, _window, cx| {
                 let mut library_path = cx.global::<Settings>().emulator.library_path.clone();
 
                 if !library_path.is_dir() {
@@ -1291,7 +1285,7 @@ impl Render for MainWindow {
                 cx.notify();
             }))
             .on_action::<actions::file::OpenRomPath>(cx.listener(
-                move |this, actions::file::OpenRomPath(rom_path), window, cx| {
+                move |this, actions::file::OpenRomPath(rom_path), _window, cx| {
                     load_rom(&mut this.gameboy.lock(), rom_path, cx);
 
                     cx.notify();
@@ -1360,7 +1354,7 @@ impl Render for MainWindow {
                     });
                 },
             ))
-            .on_action::<actions::tools::EmbedRomInPng>(cx.listener(|this, event, window, cx| {
+            .on_action::<actions::tools::EmbedRomInPng>(cx.listener(|_this, _event, _window, cx| {
                 let mut library_path = cx.global::<Settings>().emulator.library_path.clone();
 
                 if !library_path.is_dir() {
@@ -1439,7 +1433,7 @@ impl Render for MainWindow {
                 }
             }))
             .on_action(
-                cx.listener(|this, _event: &actions::help::OpenAbout, window, cx| {
+                cx.listener(|_this, _event: &actions::help::OpenAbout, window, cx| {
                     if let Some(window_handle) =
                         cx.global_mut::<WindowMap>().get(&WindowType::About)
                     {
@@ -1454,7 +1448,7 @@ impl Render for MainWindow {
                 }),
             )
             .on_action(
-                cx.listener(|this, _event: &actions::help::Luna, window, cx| {
+                cx.listener(|_this, _event: &actions::help::Luna, window, cx| {
                     if let Some(window_handle) = cx.global_mut::<WindowMap>().get(&WindowType::Luna)
                     {
                         window_handle
@@ -1534,7 +1528,7 @@ fn redraw_screen(
     gpu_context: Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>,
 ) {
     let screen = *global_state.gameboy.lock().get_screen();
-    let palette = global_state.palette.lock().clone();
+    let palette = *global_state.palette.lock();
 
     rayon::spawn(move || {
         let palette = palette.conv::<Palette<f32>>();

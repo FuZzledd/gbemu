@@ -31,7 +31,7 @@ impl Root {
             if let Ok(entity) = elem.view.clone().downcast::<PromptRenderer>() {
                 cx.subscribe(
                     &entity,
-                    |this, entity, PromptResponse(response): &PromptResponse, cx| {
+                    |_this, _entity, PromptResponse(response): &PromptResponse, cx| {
                         cx.emit(PromptResponse(*response));
                     },
                 )
@@ -85,7 +85,7 @@ impl Render for Root {
     ) -> impl IntoElement {
         let theme = cx.global::<ThemeRegistry>().current_theme();
 
-        let background = theme.palette.background();
+        let _background = theme.palette.background();
 
         let border = theme.palette.gray();
 

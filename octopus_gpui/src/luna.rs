@@ -50,7 +50,7 @@ impl LunaWindow {
         let about_window = Self::new(window, cx);
         let root = Root::new(about_window.clone(), window, cx);
         root.update(cx, |root, _cx| {
-            root.on_close_request(move |window, cx| window.remove_window())
+            root.on_close_request(move |window, _cx| window.remove_window())
         });
         root
     }
@@ -70,7 +70,7 @@ impl LunaWindow {
 }
 
 impl Render for LunaWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let element_id = ElementId::from(("Luna", cx.entity_id()));
 
         div()

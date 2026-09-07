@@ -42,7 +42,7 @@ impl Button {
             anim_duration: hover_anim_duration,
             style: StyleRefinement::default(),
             children: vec![],
-            id: id,
+            id,
             disabled: false,
             resolved_style: None,
             on_click: Box::new(|_, _, _| {}),

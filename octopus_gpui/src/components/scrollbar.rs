@@ -102,7 +102,7 @@ impl RenderOnce for Scrollbar {
                     .bg(border)
                     .w_2()
                     .rounded_xl()
-                    .on_drag((), |_, _, _, cx: &mut App| cx.new(|cx| EmptyView))
+                    .on_drag((), |_, _, _, cx: &mut App| cx.new(|_cx| EmptyView))
                     .on_mouse_down(
                         MouseButton::Left,
                         using!([drag_start_position], move |event, window, cx| {
@@ -202,7 +202,7 @@ impl RenderOnce for ListScrollbar {
 
         sb.on_drag_start = Some(Box::new(using!(
             [self.list_state, initial_offset],
-            move |event, window, cx| {
+            move |_event, _window, cx| {
                 initial_offset.write(cx, Some(list_state.scroll_px_offset_for_scrollbar()));
                 list_state.scrollbar_drag_started()
             }
@@ -210,7 +210,7 @@ impl RenderOnce for ListScrollbar {
 
         sb.on_drag_end = Some(Rc::new(using!(
             [self.list_state, initial_offset],
-            move |event, window, cx| {
+            move |_event, _window, cx| {
                 initial_offset.write(cx, None);
                 list_state.scrollbar_drag_ended()
             }
@@ -218,7 +218,7 @@ impl RenderOnce for ListScrollbar {
 
         sb.on_drag_move = Some(Box::new(using!(
             [self.list_state, initial_offset],
-            move |drag_offset, window, cx| {
+            move |drag_offset, _window, cx| {
                 if let Some(&initial_scroll_offset) = initial_offset.read(cx).as_ref() {
                     list_state.set_offset_from_scrollbar(initial_scroll_offset - drag_offset);
                 }
@@ -257,21 +257,21 @@ impl RenderOnce for DivScrollbar {
 
         sb.on_drag_start = Some(Box::new(using!(
             [self.scroll_handle, initial_offset],
-            move |event, window, cx| {
+            move |_event, _window, cx| {
                 initial_offset.write(cx, Some(scroll_handle.offset()));
             }
         )));
 
         sb.on_drag_end = Some(Rc::new(using!(
             [initial_offset],
-            move |event, window, cx| {
+            move |_event, _window, cx| {
                 initial_offset.write(cx, None);
             }
         )));
 
         sb.on_drag_move = Some(Box::new(using!(
             [self.scroll_handle, initial_offset],
-            move |drag_offset, window, cx| {
+            move |drag_offset, _window, cx| {
                 if let Some(&initial_scroll_offset) = initial_offset.read(cx).as_ref() {
                     scroll_handle.set_offset(initial_scroll_offset - drag_offset);
                 }

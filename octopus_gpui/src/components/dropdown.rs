@@ -9,7 +9,7 @@ use uzi::using;
 use crate::{
     components::{
         button::Button,
-        scrollbar::{DivScrollbar, ListScrollbar},
+        scrollbar::ListScrollbar,
     },
     ext::ElementBoundsExt,
     theme::ThemeRegistry,
@@ -57,15 +57,15 @@ impl<T: 'static, K: 'static> Dropdown<T, K> {
 }
 
 impl<T: Clone + 'static> Render for Dropdown<T> {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let entity_id = cx.entity_id();
         let element_id = ElementId::from(("Dropdown", entity_id));
         let self_entity = cx.entity();
 
         let theme = cx.global::<ThemeRegistry>().current_theme();
 
-        let background = theme.palette.darker_background();
-        let lighter_background = theme.palette.lighter_background();
+        let _background = theme.palette.darker_background();
+        let _lighter_background = theme.palette.lighter_background();
 
         let foreground = theme.palette.foreground();
 
@@ -111,8 +111,8 @@ impl<T: Clone + 'static> Render for Dropdown<T> {
                     ),
             )
             .track_focus(&self.focus_handle)
-            .on_bounds_prepaint(cx.listener(|this, bounds: &Bounds<Pixels>, window, cx| {
-                this.bounds = Some(bounds.clone());
+            .on_bounds_prepaint(cx.listener(|this, bounds: &Bounds<Pixels>, _window, _cx| {
+                this.bounds = Some(*bounds);
             }))
             .when(self.open, |this| {
                 this.when_some(self.bounds, |this, bounds| {
@@ -126,7 +126,7 @@ impl<T: Clone + 'static> Render for Dropdown<T> {
                     ))
                 })
                 .on_key_down(cx.listener(
-                    |this, event: &KeyDownEvent, window, cx| {
+                    |this, event: &KeyDownEvent, _window, _cx| {
                         if let Some(char) = &event.keystroke.key_char
                             && let Some((idx, _)) = this
                                 .options
@@ -138,7 +138,7 @@ impl<T: Clone + 'static> Render for Dropdown<T> {
                     },
                 ))
             })
-            .on_click(cx.listener(|this, event, window, cx| {
+            .on_click(cx.listener(|this, _event, _window, _cx| {
                 this.open = true;
             }))
             .tap_mut(|this| this.style().refine(&self.style))
@@ -206,7 +206,7 @@ impl<T: Clone + 'static> RenderOnce for DropdownPopup<T> {
             .child(
                 list(
                     list_state.clone(),
-                    using!([element_id, parent], move |idx, window, cx| {
+                    using!([element_id, parent], move |idx, _window, _cx| {
                         let option = options[idx].clone();
 
                         Button::new(
@@ -217,7 +217,7 @@ impl<T: Clone + 'static> RenderOnce for DropdownPopup<T> {
                             this.background(lighter_background)
                         })
                         .child(option.0)
-                        .on_click(using!([parent], move |event, window, cx| {
+                        .on_click(using!([parent], move |_event, _window, cx| {
                             parent.update(cx, move |parent, cx| {
                                 parent.selected_idx = idx;
                                 parent.open = false;
@@ -247,8 +247,8 @@ impl<T: Clone + 'static> RenderOnce for DropdownPopup<T> {
             .flex_basis(px(0.0))
             .flex_col()
             .w(bounds.size.width)
-            .on_mouse_down_out(using!([parent], move |event, window, cx| {
-                parent.update(cx, |parent, cx| parent.open = false)
+            .on_mouse_down_out(using!([parent], move |_event, _window, cx| {
+                parent.update(cx, |parent, _cx| parent.open = false)
             }))
             .tap_mut(|this| this.style().refine(&self.style))
     }

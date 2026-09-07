@@ -29,7 +29,7 @@ impl Default for Separator {
 }
 
 impl RenderOnce for Separator {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.global::<ThemeRegistry>().current_theme();
         let border = theme.palette.gray();
         drop(theme);

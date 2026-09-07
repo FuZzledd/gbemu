@@ -5,11 +5,11 @@ use core::{
     ops::{BitAnd, BitOr, Index, IndexMut, Not, Shl, Shr},
     sync::atomic::{AtomicBool, Ordering},
 };
-use std::{mem, path::PathBuf};
+use std::mem;
 use std::{path::Path, sync::LazyLock};
 
 use octopus_common::theme::Color;
-use palette::{IntoColor, Srgba};
+use palette::Srgba;
 use parking_lot::Mutex;
 use rgb::{ComponentMap, Gray, Rgba};
 use serde::{Deserialize, Serialize};

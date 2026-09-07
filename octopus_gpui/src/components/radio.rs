@@ -35,9 +35,9 @@ impl Styled for RadioButton {
 }
 
 impl RenderOnce for RadioButton {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.global::<ThemeRegistry>().current_theme();
-        let background = theme.palette.background();
+        let _background = theme.palette.background();
         let foreground = theme.palette.foreground();
         let border = theme.palette.gray();
         drop(theme);
@@ -62,7 +62,7 @@ impl RenderOnce for RadioButton {
                 .aspect_square(),
         )
         .when_some(self.on_checked, move |this, on_checked| {
-            this.on_click(move |event, window, cx| on_checked(&self.checked, window, cx))
+            this.on_click(move |_event, window, cx| on_checked(&self.checked, window, cx))
         })
         .tap_mut(|this| this.style().refine(&self.style))
     }

@@ -4,7 +4,7 @@ use core::cell::RefCell;
 use core::cell::{Ref, RefMut};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     sync::{Arc, LazyLock},
 };
 

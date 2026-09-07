@@ -13,7 +13,7 @@ use slotmap::{DenseSlotMap, new_key_type};
 use smallvec::SmallVec;
 use strum::{EnumDiscriminants, IntoDiscriminant};
 
-use crate::actions::{SerializableAction, SerializedAction};
+use crate::actions::SerializedAction;
 
 new_key_type! { pub struct GamepadEventKey; }
 new_key_type! { pub struct GamepadPressEventKey; }
@@ -97,10 +97,10 @@ impl GamepadService {
                     for (handler, window_handle) in
                         self.on_gamepad_press_event_listeners.clone().values()
                     {
-                        let window_handle = window_handle.clone();
+                        let window_handle = *window_handle;
                         let handler = handler.clone();
 
-                        cx.update_window(window_handle.clone(), |_, window, cx| {
+                        cx.update_window(window_handle, |_, window, cx| {
                             handler(&GamepadButton::Button(button), &event, self, window, cx);
                         })
                         .unwrap();
@@ -111,10 +111,10 @@ impl GamepadService {
                     for (handler, window_handle) in
                         self.on_gamepad_release_event_listeners.clone().values()
                     {
-                        let window_handle = window_handle.clone();
+                        let window_handle = *window_handle;
                         let handler = handler.clone();
 
-                        cx.update_window(window_handle.clone(), |_, window, cx| {
+                        cx.update_window(window_handle, |_, window, cx| {
                             handler(&GamepadButton::Button(button), &event, self, window, cx);
                         })
                         .unwrap();
@@ -138,7 +138,7 @@ impl GamepadService {
                         for (handler, window_handle) in
                             self.on_gamepad_press_event_listeners.clone().values()
                         {
-                            let window_handle = window_handle.clone();
+                            let window_handle = *window_handle;
                             let handler = handler.clone();
 
                             let button = match axis {
@@ -155,7 +155,7 @@ impl GamepadService {
                                 }
                             };
 
-                            cx.update_window(window_handle.clone(), |_, window, cx| {
+                            cx.update_window(window_handle, |_, window, cx| {
                                 handler(&button, &event, self, window, cx);
                             })
                             .unwrap();
@@ -165,7 +165,7 @@ impl GamepadService {
                         for (handler, window_handle) in
                             self.on_gamepad_release_event_listeners.clone().values()
                         {
-                            let window_handle = window_handle.clone();
+                            let window_handle = *window_handle;
                             let handler = handler.clone();
 
                             let button = match axis {
@@ -182,7 +182,7 @@ impl GamepadService {
                                 }
                             };
 
-                            cx.update_window(window_handle.clone(), |_, window, cx| {
+                            cx.update_window(window_handle, |_, window, cx| {
                                 handler(&button, &event, self, window, cx);
                             })
                             .unwrap();
@@ -214,10 +214,10 @@ impl GamepadService {
             }
 
             for (handler, window_handle) in self.on_gamepad_event_listeners.clone().values() {
-                let window_handle = window_handle.clone();
+                let window_handle = *window_handle;
                 let handler = handler.clone();
 
-                cx.update_window(window_handle.clone(), |_, window, cx| {
+                cx.update_window(window_handle, |_, window, cx| {
                     handler(&event, self, window, cx);
                 })
                 .unwrap();
@@ -275,7 +275,7 @@ impl<T: StatefulInteractiveElement> GamepadEventsExt for T {
             key
         });
 
-        let key = _handle.read(cx).clone();
+        let key = *_handle.read(cx);
         let gamepad_service = cx.global_mut::<GamepadService>();
 
         let map = &mut gamepad_service.on_gamepad_event_listeners;
@@ -314,7 +314,7 @@ impl<T: StatefulInteractiveElement> GamepadEventsExt for T {
             key
         });
 
-        let key = _handle.read(cx).clone();
+        let key = *_handle.read(cx);
         let gamepad_service = cx.global_mut::<GamepadService>();
 
         let map = &mut gamepad_service.on_gamepad_press_event_listeners;
@@ -353,7 +353,7 @@ impl<T: StatefulInteractiveElement> GamepadEventsExt for T {
             key
         });
 
-        let key = _handle.read(cx).clone();
+        let key = *_handle.read(cx);
         let gamepad_service = cx.global_mut::<GamepadService>();
 
         let map = &mut gamepad_service.on_gamepad_release_event_listeners;

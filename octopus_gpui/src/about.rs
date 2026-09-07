@@ -1,6 +1,4 @@
-use gpui::{prelude::FluentBuilder, *};
-use gpui_elements::editable_text::{EditableTextState, StringStorage, text_input};
-use tap::Tap;
+use gpui::*;
 
 use crate::{
     WindowMap, WindowType, actions,
@@ -39,7 +37,7 @@ impl AboutWindow {
         let about_window = Self::new(window, cx);
         let root = Root::new(about_window.clone(), window, cx);
         root.update(cx, |root, _cx| {
-            root.on_close_request(move |window, cx| window.remove_window())
+            root.on_close_request(move |window, _cx| window.remove_window())
         });
         root
     }
@@ -59,12 +57,12 @@ impl AboutWindow {
 }
 
 impl Render for AboutWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.global::<ThemeRegistry>().current_theme();
 
         let background = theme.palette.background();
         let foreground = theme.palette.foreground();
-        let border = theme.palette.gray();
+        let _border = theme.palette.gray();
 
         drop(theme);
 

@@ -134,7 +134,9 @@ impl<'de> Deserialize<'de> for SerializedAction {
                     .clone();
 
                     let mut action_input: Option<SharedString> = None;
-                    let action = match action_raw.clone() {
+                    
+                
+                match action_raw.clone() {
                         Value::String(ref name) => cx.update(move |cx| {
                             cx.build_action(name, None)
                                 .map_err(|err| de::Error::custom(format!("Couldn't build action {err}, name={name}")))
@@ -158,9 +160,7 @@ impl<'de> Deserialize<'de> for SerializedAction {
                             })?
                         }
                         _ => return Err(de::Error::custom("Expected a valid action")),
-                    };
-                
-                action
+                    }
             };
             cx.set(taken_cx);
             Ok(

@@ -4,7 +4,7 @@ use better_default::Default;
 use bytemuck::{Pod, Zeroable};
 use databake::Bake;
 use palette::{
-    FromColor, Hsla, IntoColor, Srgb, Srgba, convert::FromColorUnclamped, rgb::PackedRgba,
+    FromColor, Hsla, IntoColor, Srgb, Srgba,
 };
 use serde::{Deserialize, Serialize, de::Visitor};
 use std::str::FromStr;
@@ -103,9 +103,7 @@ impl Visitor<'_> for ColorVisitor {
     {
         palette::Srgba::<f32>::from_str(v)
             .or_else(|_| Srgb::from_str(v).map(|x| x.into()))
-            .map_err(E::custom)
-            .map(Srgba::from)
-            .map(Color)
+            .map_err(E::custom).map(Color)
     }
 }
 

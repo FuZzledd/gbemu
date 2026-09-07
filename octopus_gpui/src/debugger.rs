@@ -2,7 +2,7 @@ use crate::{
     GlobalState, WindowMap, WindowType,
     components::{
         root::Root,
-        scrollbar::{DivScrollbar, ListScrollbar},
+        scrollbar::ListScrollbar,
         titlebar::TitleBar,
     },
     theme::ThemeRegistry,

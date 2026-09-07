@@ -95,7 +95,7 @@ impl Render for MenuBar {
         let _dismiss_subscriber = window.use_keyed_state(
             (element_id.clone(), "dismiss_subscriber"),
             cx,
-            |window, cx| {
+            |_window, cx| {
                 cx.subscribe(
                     &entity,
                     using!([current_popup], move |_this, _, _: &DismissEvent, cx| {
